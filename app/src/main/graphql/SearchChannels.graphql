@@ -1,0 +1,22 @@
+query SearchChannels($query: String!, $first: Int, $after: Cursor) {
+    searchUsers(userQuery: $query, first: $first, after: $after) {
+        edges {
+            cursor
+            node {
+                displayName
+                followers {
+                    totalCount
+                }
+                id
+                login
+                profileImageURL(width: 300)
+                stream {
+                    viewersCount
+                }
+            }
+        }
+        pageInfo {
+            hasNextPage
+        }
+    }
+}

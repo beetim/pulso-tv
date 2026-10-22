@@ -1,0 +1,13 @@
+package com.pulso.tv.model.ui
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "sort_channel")
+class ChannelSort(
+    @PrimaryKey
+    val id: String,
+    var videoSort: String? = null,
+    var videoType: String? = null,
+    var clipPeriod: String? = null,
+)
