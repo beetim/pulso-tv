@@ -43,6 +43,7 @@ class PulsoHomeActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         resumeTick++
+        PulsoUpdater.checkIfDue(applicationContext)
     }
 
     private val loginLauncher =

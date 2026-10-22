@@ -131,9 +131,13 @@ fun PulsoHome(
     var profileOpen by remember { mutableStateOf(false) }
     var langOpen by remember { mutableStateOf(false) }
     var exitOpen by remember { mutableStateOf(false) }
+    var updateOpen by remember { mutableStateOf(false) }
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val update = PulsoUpdater.state as? PulsoUpdater.State.Available
     // Voltar closes an open panel; on the bare Home it asks before leaving the app
     androidx.activity.compose.BackHandler(enabled = true) {
         when {
+            updateOpen -> updateOpen = false
             profileOpen || langOpen -> { profileOpen = false; langOpen = false }
             exitOpen -> exitOpen = false
             else -> exitOpen = true
@@ -152,6 +156,8 @@ fun PulsoHome(
             Header(
                 loggedIn = loggedIn, userName = userName, onSearch = onSearch, onLogin = onLogin,
                 onProfile = { profileOpen = true }, onLanguage = { langOpen = true },
+                updateVersion = update?.version?.takeIf { !PulsoUpdater.dismissed },
+                onUpdate = { updateOpen = true },
             )
             Column(
                 Modifier
@@ -213,6 +219,58 @@ fun PulsoHome(
 
         if (exitOpen) {
             ExitCard(onStay = { exitOpen = false }, onExit = onExit)
+        }
+
+        if (updateOpen) {
+            UpdateCard(
+                onUpdate = { PulsoUpdater.downloadAndInstall(appContext) },
+                onLater = { PulsoUpdater.dismissed = true; updateOpen = false },
+                onClose = { updateOpen = false },
+            )
+        }
+    }
+}
+
+/** "Nova versão disponível": release notes plus Atualizar agora / Depois; shows download progress. */
+@Composable
+private fun UpdateCard(onUpdate: () -> Unit, onLater: () -> Unit, onClose: () -> Unit) {
+    val first = remember { FocusRequester() }
+    focusWhenReady(first, true, Unit)
+    val state = PulsoUpdater.state
+    val info = state as? PulsoUpdater.State.Available
+    val busy = state is PulsoUpdater.State.Downloading
+    Box(
+        Modifier.fillMaxSize().background(Color(0xB3000000))
+            .focusProperties { exit = { FocusRequester.Cancel } }
+            .focusGroup()
+            .pointerInput(Unit) { detectTapGestures { onClose() } },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier
+                .width(520.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Pulso.Surface)
+                .pointerInput(Unit) { detectTapGestures { } }
+                .padding(horizontal = 32.dp, vertical = 27.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Nova versão disponível", color = Pulso.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(
+                "v${info?.version.orEmpty()}  (atual v${com.pulso.tv.BuildConfig.VERSION_NAME})",
+                color = Pulso.Yellow, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            )
+            val notes = info?.notes.orEmpty().lines().filter { it.isNotBlank() }.take(6).joinToString("\n")
+            if (notes.isNotEmpty()) Text(notes, color = Pulso.TextSecondary, fontSize = 13.sp)
+            when (state) {
+                is PulsoUpdater.State.Downloading -> Text("Baixando… ${state.percent}%", color = Pulso.TextPrimary, fontSize = 14.sp)
+                is PulsoUpdater.State.Failed -> Text(state.reason, color = Pulso.TextSecondary, fontSize = 13.sp)
+                else -> {}
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
+                PulsoPill("Atualizar agora", primary = true, enabled = !busy, height = 40.dp, requester = first, onClick = onUpdate)
+                PulsoPill("Depois", height = 40.dp, onClick = onLater)
+            }
         }
     }
 }
@@ -297,6 +355,46 @@ private fun ProfilePanel(
             PulsoPill("Canais que sigo", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onFollowed)
             PulsoPill("Configurações", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onSettings)
             PulsoPill("Sair da conta", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onLogout)
+            Spacer(Modifier.weight(1f))
+            ProfileFooter()
+        }
+    }
+}
+
+/** Bottom of the profile panel: brand, version, update status and the legal notes. */
+@Composable
+private fun ProfileFooter() {
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val state = PulsoUpdater.state
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Pulso.SurfaceRaised))
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        PulsoLogo(markSize = 28.dp)
+        Text(
+            "versão ${com.pulso.tv.BuildConfig.VERSION_NAME} (${com.pulso.tv.BuildConfig.VERSION_CODE})",
+            color = Pulso.TextSecondary, fontSize = 12.sp,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+    val status = when {
+        !PulsoUpdater.enabled -> "Atualização desativada nesta versão"
+        state is PulsoUpdater.State.Checking -> "Verificando…"
+        state is PulsoUpdater.State.UpToDate -> "Você está na versão mais recente"
+        state is PulsoUpdater.State.Available -> "Nova versão disponível: v${state.version}"
+        state is PulsoUpdater.State.Downloading -> "Baixando… ${state.percent}%"
+        state is PulsoUpdater.State.Failed -> state.reason
+        else -> null
+    }
+    if (status != null) Text(status, color = Pulso.TextSecondary, fontSize = 12.sp)
+    if (PulsoUpdater.enabled) {
+        if (state is PulsoUpdater.State.Available) {
+            PulsoPill("Atualizar agora", primary = true, height = 40.dp, modifier = Modifier.fillMaxWidth()) {
+                PulsoUpdater.downloadAndInstall(context)
+            }
+        } else {
+            PulsoPill(
+                "Verificar atualizações", height = 40.dp, modifier = Modifier.fillMaxWidth(),
+                enabled = state !is PulsoUpdater.State.Checking && state !is PulsoUpdater.State.Downloading,
+            ) { PulsoUpdater.checkNow(context) }
         }
     }
 }
@@ -309,6 +407,8 @@ private fun Header(
     onLogin: () -> Unit,
     onProfile: () -> Unit,
     onLanguage: () -> Unit,
+    updateVersion: String? = null,
+    onUpdate: () -> Unit = {},
 ) {
     Row(
         Modifier
@@ -323,6 +423,7 @@ private fun Header(
             PulsoLogo(markSize = 40.dp)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (updateVersion != null) NavPill("Atualizar v$updateVersion", onClick = onUpdate)
             NavPill("Busca", onClick = onSearch)
             // The chip already carries the language's own name, so it is readable no
             // matter which language is active. OK opens the card to change it.
