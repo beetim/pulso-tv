@@ -49,23 +49,34 @@ cliente leve.
 
 ## Instalação
 
-Baixe o **`Pulso.apk`** mais recente na página de
-[Releases](https://github.com/beetim/pulso-tv/releases/latest) e escolha um dos caminhos abaixo.
-
-### Opção 1 · pelo PC, com adb
+### Opção 1 · um comando pelo PC (recomendada)
 
 1. Na TV, abra **Configurações → Sistema → Sobre** e aperte 7 vezes em **Compilação** para ativar
    o modo desenvolvedor.
 2. Em **Opções do desenvolvedor**, ligue **Depuração USB** e **Depuração por rede**
    (o nome muda conforme o fabricante). Anote o IP da TV em **Rede**.
-3. No PC, com o [adb](https://developer.android.com/tools/releases/platform-tools) instalado:
+3. No PC, com o [adb](https://developer.android.com/tools/releases/platform-tools) instalado, rode
+   o comando do seu sistema. Ele baixa a última versão direto deste repositório, instala na TV e
+   abre o app.
 
-```bash
-adb connect <ip-da-tv>:5555
-adb install -r Pulso.apk
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/beetim/pulso-tv/main/install.ps1 | iex
 ```
 
-Aceite o pedido de autorização que aparece na TV na primeira conexão.
+**Linux e macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/beetim/pulso-tv/main/install.sh | bash -s -- <ip-da-tv>
+```
+
+Aceite o pedido de autorização que aparece na TV na primeira conexão. Os scripts são pequenos:
+[`install.ps1`](install.ps1) e [`install.sh`](install.sh), leia antes de rodar se preferir.
+
+Se quiser fazer à mão: baixe o `Pulso.apk` em
+[Releases](https://github.com/beetim/pulso-tv/releases/latest) e rode
+`adb connect <ip-da-tv>:5555` e `adb install -r Pulso.apk`.
 
 ### Opção 2 · pelo app Downloader, direto na TV
 

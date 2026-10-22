@@ -260,8 +260,16 @@ private fun UpdateCard(onUpdate: () -> Unit, onLater: () -> Unit, onClose: () ->
                 "v${info?.version.orEmpty()}  (atual v${com.pulso.tv.BuildConfig.VERSION_NAME})",
                 color = Pulso.Yellow, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
             )
-            val notes = info?.notes.orEmpty().lines().filter { it.isNotBlank() }.take(6).joinToString("\n")
-            if (notes.isNotEmpty()) Text(notes, color = Pulso.TextSecondary, fontSize = 13.sp)
+            // release notes are Markdown: show them as plain bullets
+            val notes = info?.notes.orEmpty().lines()
+                .map { it.trim().trimStart('#', ' ').replace("**", "").replace("`", "") }
+                .filter { it.isNotBlank() }
+                .map { if (it.startsWith("- ") || it.startsWith("* ")) "•  " + it.drop(2) else it }
+                .take(8).joinToString("\n")
+            if (notes.isNotEmpty()) {
+                Text("O que há de novo", color = Pulso.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(notes, color = Pulso.TextSecondary, fontSize = 14.sp)
+            }
             when (state) {
                 is PulsoUpdater.State.Downloading -> Text("Baixando… ${state.percent}%", color = Pulso.TextPrimary, fontSize = 14.sp)
                 is PulsoUpdater.State.Failed -> Text(state.reason, color = Pulso.TextSecondary, fontSize = 13.sp)

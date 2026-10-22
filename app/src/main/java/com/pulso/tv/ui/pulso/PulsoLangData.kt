@@ -143,6 +143,7 @@ internal val LANG_TABLES: Map<String, PulsoLangTable> = mapOf(
             "Outros canais" to "Other channels",
             "Nova versão disponível" to "New version available",
             "Atualizar agora" to "Update now",
+            "O que há de novo" to "What's new",
             "Depois" to "Later",
             "Verificar atualizações" to "Check for updates",
             "Verificando…" to "Checking…",
