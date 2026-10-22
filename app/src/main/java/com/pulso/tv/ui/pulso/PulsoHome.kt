@@ -133,19 +133,44 @@ fun PulsoHome(
     var exitOpen by remember { mutableStateOf(false) }
     var updateOpen by remember { mutableStateOf(false) }
     val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    val update = PulsoUpdater.state as? PulsoUpdater.State.Available
-    // Voltar closes an open panel; on the bare Home it asks before leaving the app
-    androidx.activity.compose.BackHandler(enabled = true) {
-        when {
-            updateOpen -> updateOpen = false
-            profileOpen || langOpen -> { profileOpen = false; langOpen = false }
-            exitOpen -> exitOpen = false
-            else -> exitOpen = true
-        }
-    }
+    val update = PulsoUpdater.pending
     val firstCard = remember { FocusRequester() }
     // keyed on "has content" only: refreshing a shelf must not yank focus back to the top
     focusWhenReady(firstCard, shelves.isNotEmpty(), shelves.isNotEmpty())
+
+    // Header pills: an overlay hands the focus back to the pill that opened it, and the
+    // account pill gets it after a login/logout (it is a different pill by then)
+    val searchPill = remember { FocusRequester() }
+    val updatePill = remember { FocusRequester() }
+    val langPill = remember { FocusRequester() }
+    val userPill = remember { FocusRequester() }
+    var refocus by remember { mutableStateOf<FocusRequester?>(null) }
+    LaunchedEffect(refocus) {
+        val target = refocus ?: return@LaunchedEffect
+        withFrameNanos { } // let the closing overlay leave the tree first
+        var tries = 0
+        while (tries++ < 10 && !runCatching { target.requestFocus() }.getOrDefault(false)) withFrameNanos { }
+        refocus = null
+    }
+    var lastLoggedIn by remember { mutableStateOf(loggedIn) }
+    LaunchedEffect(loggedIn) {
+        if (loggedIn != lastLoggedIn) { lastLoggedIn = loggedIn; refocus = userPill }
+    }
+    fun closeProfile() { profileOpen = false; refocus = userPill }
+    fun closeLanguage() { langOpen = false; refocus = langPill }
+    fun closeExit() { exitOpen = false; refocus = if (shelves.isNotEmpty()) firstCard else searchPill }
+    fun closeUpdate(later: Boolean) { updateOpen = false; refocus = if (later) searchPill else updatePill }
+
+    // Voltar closes an open panel; on the bare Home it asks before leaving the app
+    androidx.activity.compose.BackHandler(enabled = true) {
+        when {
+            updateOpen -> closeUpdate(later = false)
+            profileOpen -> closeProfile()
+            langOpen -> closeLanguage()
+            exitOpen -> closeExit()
+            else -> exitOpen = true
+        }
+    }
 
     Box(
         Modifier
@@ -154,10 +179,12 @@ fun PulsoHome(
     ) {
         Column(Modifier.fillMaxSize()) {
             Header(
-                loggedIn = loggedIn, userName = userName, onSearch = onSearch, onLogin = onLogin,
+                loggedIn = loggedIn, userName = userName, onSearch = onSearch,
+                // logged out too: the panel is the only way to Configurações and the update check
                 onProfile = { profileOpen = true }, onLanguage = { langOpen = true },
                 updateVersion = update?.version?.takeIf { !PulsoUpdater.dismissed },
                 onUpdate = { updateOpen = true },
+                searchPill = searchPill, updatePill = updatePill, langPill = langPill, userPill = userPill,
             )
             Column(
                 Modifier
@@ -205,27 +232,29 @@ fun PulsoHome(
 
         if (profileOpen) {
             ProfilePanel(
+                loggedIn = loggedIn,
                 userName = userName.orEmpty(),
-                onLogout = { profileOpen = false; onLogout() },
-                onFollowed = { profileOpen = false; onFollowedChannels() },
-                onSettings = { profileOpen = false; onSettings() },
-                onClose = { profileOpen = false },
+                onLogin = { closeProfile(); onLogin() },
+                onLogout = { closeProfile(); onLogout() },
+                onFollowed = { closeProfile(); onFollowedChannels() },
+                onSettings = { closeProfile(); onSettings() },
+                onClose = { closeProfile() },
             )
         }
 
         if (langOpen) {
-            LanguageCard(onClose = { langOpen = false })
+            LanguageCard(onClose = { closeLanguage() })
         }
 
         if (exitOpen) {
-            ExitCard(onStay = { exitOpen = false }, onExit = onExit)
+            ExitCard(onStay = { closeExit() }, onExit = onExit)
         }
 
         if (updateOpen) {
             UpdateCard(
                 onUpdate = { PulsoUpdater.downloadAndInstall(appContext) },
-                onLater = { PulsoUpdater.dismissed = true; updateOpen = false },
-                onClose = { updateOpen = false },
+                onLater = { PulsoUpdater.dismissed = true; closeUpdate(later = true) },
+                onClose = { closeUpdate(later = false) },
             )
         }
     }
@@ -237,8 +266,10 @@ private fun UpdateCard(onUpdate: () -> Unit, onLater: () -> Unit, onClose: () ->
     val first = remember { FocusRequester() }
     focusWhenReady(first, true, Unit)
     val state = PulsoUpdater.state
-    val info = state as? PulsoUpdater.State.Available
+    // the release lives in `pending`, so a failed download or an opened installer keeps the card filled
+    val info = PulsoUpdater.pending
     val busy = state is PulsoUpdater.State.Downloading
+    val ready = state is PulsoUpdater.State.Ready
     Box(
         Modifier.fillMaxSize().background(Color(0xB3000000))
             .focusProperties { exit = { FocusRequester.Cancel } }
@@ -272,11 +303,15 @@ private fun UpdateCard(onUpdate: () -> Unit, onLater: () -> Unit, onClose: () ->
             }
             when (state) {
                 is PulsoUpdater.State.Downloading -> Text("Baixando… ${state.percent}%", color = Pulso.TextPrimary, fontSize = 14.sp)
+                is PulsoUpdater.State.Ready -> Text("Pronto para instalar", color = Pulso.TextPrimary, fontSize = 14.sp)
                 is PulsoUpdater.State.Failed -> Text(state.reason, color = Pulso.TextSecondary, fontSize = 13.sp)
                 else -> {}
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
-                PulsoPill("Atualizar agora", primary = true, enabled = !busy, height = 40.dp, requester = first, onClick = onUpdate)
+                PulsoPill(
+                    if (ready) "Instalar agora" else "Atualizar agora",
+                    primary = true, enabled = !busy && info != null, height = 40.dp, requester = first, onClick = onUpdate,
+                )
                 PulsoPill("Depois", height = 40.dp, onClick = onLater)
             }
         }
@@ -317,14 +352,17 @@ private fun ExitCard(onStay: () -> Unit, onExit: () -> Unit) {
 /** Right-hand account panel: who is connected, and how to sign out. */
 @Composable
 private fun ProfilePanel(
+    loggedIn: Boolean,
     userName: String,
+    onLogin: () -> Unit,
     onLogout: () -> Unit,
     onFollowed: () -> Unit,
     onSettings: () -> Unit,
     onClose: () -> Unit,
 ) {
     val closeFocus = remember { FocusRequester() }
-    // focus starts on "Fechar" so an accidental OK never signs the user out
+    // focus starts on "Fechar" so an accidental OK never signs the user out; logged out
+    // there is nothing risky, so it starts on "Entrar" (header OK + OK still logs in)
     focusWhenReady(closeFocus, true, Unit)
     Box(
         Modifier.fillMaxSize().background(Color(0xB3000000))
@@ -342,27 +380,38 @@ private fun ProfilePanel(
                 .padding(horizontal = 24.dp, vertical = 27.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Perfil", color = Pulso.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
-                Box(
-                    Modifier.size(56.dp).clip(RoundedCornerShape(50)).background(Pulso.Cobalt),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        userName.take(1).uppercase(), color = Color.White,
-                        fontSize = 26.sp, fontWeight = FontWeight.ExtraBold,
-                    )
+            Text(if (loggedIn) "Perfil" else "Conta", color = Pulso.TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            if (loggedIn) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                    Box(
+                        Modifier.size(56.dp).clip(RoundedCornerShape(50)).background(Pulso.Cobalt),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            userName.take(1).uppercase(), color = Color.White,
+                            fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, translate = false,
+                        )
+                    }
+                    Box(Modifier.width(14.dp))
+                    Column {
+                        Text("@$userName", color = Pulso.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold, translate = false)
+                        Text("Conectado à Twitch", color = Pulso.TextSecondary, fontSize = 12.sp)
+                    }
                 }
-                Box(Modifier.width(14.dp))
-                Column {
-                    Text("@$userName", color = Pulso.TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text("Conectado à Twitch", color = Pulso.TextSecondary, fontSize = 12.sp)
-                }
+                PulsoPill("Fechar", height = 40.dp, requester = closeFocus, modifier = Modifier.fillMaxWidth(), onClick = onClose)
+                PulsoPill("Canais que sigo", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onFollowed)
+                PulsoPill("Configurações", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onSettings)
+                PulsoPill("Sair da conta", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onLogout)
+            } else {
+                Text(
+                    "Você não está conectado", color = Pulso.TextPrimary, fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp),
+                )
+                Text("Entre para ver os canais que você segue.", color = Pulso.TextSecondary, fontSize = 12.sp)
+                PulsoPill("Entrar", primary = true, height = 40.dp, requester = closeFocus, modifier = Modifier.fillMaxWidth(), onClick = onLogin)
+                PulsoPill("Configurações", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onSettings)
+                PulsoPill("Fechar", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onClose)
             }
-            PulsoPill("Fechar", height = 40.dp, requester = closeFocus, modifier = Modifier.fillMaxWidth(), onClick = onClose)
-            PulsoPill("Canais que sigo", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onFollowed)
-            PulsoPill("Configurações", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onSettings)
-            PulsoPill("Sair da conta", height = 40.dp, modifier = Modifier.fillMaxWidth(), onClick = onLogout)
             Spacer(Modifier.weight(1f))
             ProfileFooter()
         }
@@ -383,26 +432,30 @@ private fun ProfileFooter() {
             modifier = Modifier.padding(top = 6.dp),
         )
     }
+    val pending = PulsoUpdater.pending
     val status = when {
         !PulsoUpdater.enabled -> "Atualização desativada nesta versão"
         state is PulsoUpdater.State.Checking -> "Verificando…"
-        state is PulsoUpdater.State.UpToDate -> "Você está na versão mais recente"
-        state is PulsoUpdater.State.Available -> "Nova versão disponível: v${state.version}"
         state is PulsoUpdater.State.Downloading -> "Baixando… ${state.percent}%"
+        state is PulsoUpdater.State.Ready -> "Pronto para instalar"
         state is PulsoUpdater.State.Failed -> state.reason
+        pending != null -> "Nova versão disponível: v${pending.version}"
+        state is PulsoUpdater.State.UpToDate -> "Você está na versão mais recente"
         else -> null
     }
     if (status != null) Text(status, color = Pulso.TextSecondary, fontSize = 12.sp)
     if (PulsoUpdater.enabled) {
-        if (state is PulsoUpdater.State.Available) {
-            PulsoPill("Atualizar agora", primary = true, height = 40.dp, modifier = Modifier.fillMaxWidth()) {
-                PulsoUpdater.downloadAndInstall(context)
-            }
-        } else {
-            PulsoPill(
-                "Verificar atualizações", height = 40.dp, modifier = Modifier.fillMaxWidth(),
-                enabled = state !is PulsoUpdater.State.Checking && state !is PulsoUpdater.State.Downloading,
-            ) { PulsoUpdater.checkNow(context) }
+        // one pill for both roles, so the focus stays on it when the check finds a release
+        PulsoPill(
+            when {
+                pending == null -> "Verificar atualizações"
+                state is PulsoUpdater.State.Ready -> "Instalar agora"
+                else -> "Atualizar agora"
+            },
+            primary = pending != null, height = 40.dp, modifier = Modifier.fillMaxWidth(),
+            enabled = state !is PulsoUpdater.State.Checking && state !is PulsoUpdater.State.Downloading,
+        ) {
+            if (pending != null) PulsoUpdater.downloadAndInstall(context) else PulsoUpdater.checkNow(context)
         }
     }
 }
@@ -412,11 +465,14 @@ private fun Header(
     loggedIn: Boolean,
     userName: String?,
     onSearch: () -> Unit,
-    onLogin: () -> Unit,
     onProfile: () -> Unit,
     onLanguage: () -> Unit,
     updateVersion: String? = null,
     onUpdate: () -> Unit = {},
+    searchPill: FocusRequester? = null,
+    updatePill: FocusRequester? = null,
+    langPill: FocusRequester? = null,
+    userPill: FocusRequester? = null,
 ) {
     Row(
         Modifier
@@ -431,16 +487,18 @@ private fun Header(
             PulsoLogo(markSize = 40.dp)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (updateVersion != null) NavPill("Atualizar v$updateVersion", onClick = onUpdate)
-            NavPill("Busca", onClick = onSearch)
+            if (updateVersion != null) NavPill("Atualizar v$updateVersion", requester = updatePill, onClick = onUpdate)
+            NavPill("Busca", requester = searchPill, onClick = onSearch)
             // The chip already carries the language's own name, so it is readable no
             // matter which language is active. OK opens the card to change it.
-            NavPill(PulsoLang.label, onClick = onLanguage)
+            NavPill(PulsoLang.label, requester = langPill, translate = false, onClick = onLanguage)
+            // Both states open the account panel: logged out it offers Entrar, Configurações
+            // and the update check, which would otherwise be out of reach without an account.
             if (loggedIn) {
                 val handle = userName.orEmpty().trim()
-                NavPill(if (handle.isEmpty()) "Perfil" else "@$handle", onClick = onProfile)
+                NavPill(if (handle.isEmpty()) "Perfil" else "@$handle", requester = userPill, translate = handle.isEmpty(), onClick = onProfile)
             } else {
-                NavPill("Entrar", onClick = onLogin)
+                NavPill("Entrar", requester = userPill, onClick = onProfile)
             }
         }
     }
@@ -500,6 +558,7 @@ private fun ShelfRow(
                     subtitle = (r.video.channelName ?: r.video.channelLogin).orEmpty() + " · " +
                         durationText((r.positionMs / 1000).toInt()) + " / " + durationText(r.video.durationSeconds),
                     bottomEnd = durationText(r.video.durationSeconds),
+                    translateSubtitle = false, // channel name + clock times: nothing to translate
                     focusRequester = if (i == 0 && ownerKind == 2) firstRequester else null,
                     onClick = { onOpenVideo(r.video) },
                 )
@@ -526,19 +585,25 @@ private fun ShelfRow(
 }
 
 @Composable
-private fun NavPill(label: String, onClick: () -> Unit) {
+private fun NavPill(
+    label: String,
+    requester: FocusRequester? = null,
+    translate: Boolean = true,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableIntStateOf(0) }
     val latestClick by rememberUpdatedState(onClick)
     val shape = RoundedCornerShape(50)
     Box(
         Modifier
+            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
             .onFocusChanged { focused = if (it.isFocused) 1 else 0 }
             .focusable()
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyUp &&
                     (event.key == Key.DirectionCenter || event.key == Key.Enter)
                 ) {
-                    onClick(); true
+                    latestClick(); true
                 } else false
             }
             .pointerInput(Unit) { detectTapGestures { latestClick() } }
@@ -556,14 +621,15 @@ private fun NavPill(label: String, onClick: () -> Unit) {
             color = if (focused == 1) Pulso.Background else Pulso.TextPrimary,
             fontSize = Pulso.Sp.nav,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1
+            maxLines = 1,
+            translate = translate,
         )
     }
 }
 
 @Composable
 private fun PillButton(label: String, onClick: () -> Unit) {
-    NavPill(label, onClick)
+    NavPill(label, onClick = onClick)
 }
 
 @Composable
@@ -635,7 +701,8 @@ private fun StreamCard(
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.height(36.dp)
+                        modifier = Modifier.height(36.dp),
+                        translate = false, // remote content: tr() would mangle titles like "1000 seguidores"
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -643,7 +710,8 @@ private fun StreamCard(
                         color = Pulso.TextSecondary,
                         fontSize = Pulso.Sp.channel,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        translate = false, // playingText already translated its own words
                     )
                 }
             }
@@ -661,7 +729,8 @@ private fun ErrorPanel(error: String, onRetry: () -> Unit, modifier: Modifier = 
     val retryFocus = remember { FocusRequester() }
     focusWhenReady(retryFocus, true, error)
     Column(
-        modifier.focusProperties { exit = { FocusRequester.Cancel } }.focusGroup(),
+        // no exit = Cancel here: the header (Busca, Idioma, Entrar) must stay reachable offline
+        modifier.focusGroup(),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
@@ -737,7 +806,7 @@ private fun ViewersPill(text: String, modifier: Modifier = Modifier) {
  * order starts.
  */
 @Composable
-private fun focusWhenReady(requester: FocusRequester, enabled: Boolean = true, key: Any?) {
+internal fun focusWhenReady(requester: FocusRequester, enabled: Boolean = true, key: Any?) {
     LaunchedEffect(key) {
         if (!enabled) return@LaunchedEffect
         repeat(30) {
@@ -782,6 +851,7 @@ private fun LanguageCard(onClose: () -> Unit) {
                     row.forEachIndexed { colIndex, lang ->
                         PulsoPill(
                             label = lang.endonym,
+                            translate = false,
                             primary = lang.code == active,
                             height = 44.dp,
                             requester = if (rowIndex == 0 && colIndex == 0) firstLang else null,

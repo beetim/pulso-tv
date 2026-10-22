@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.sp
 import com.pulso.tv.model.chat.ChatMessage
 import com.pulso.tv.ui.chat.ChatViewModel
 import com.pulso.tv.util.prefs
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 
 private const val MAX_MESSAGES = 200
 
@@ -45,12 +47,31 @@ fun PulsoChat(viewModel: ChatViewModel, modifier: Modifier = Modifier) {
     val listState = rememberLazyListState()
 
     LaunchedEffect(viewModel) {
-        synchronized(viewModel.chatMessages) {
-            messages.addAll(viewModel.chatMessages.takeLast(100))
+        // subscribe first (undispatched) so nothing emitted while the snapshot is taken is lost
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.newMessage.collect { (message, _, removeCount) ->
+                messages.add(message)
+                while (messages.size > MAX_MESSAGES) messages.removeAt(0)
+                // with a subscriber the engine leaves trimming of its own list to the consumer
+                if (removeCount > 0) synchronized(viewModel.chatMessages) {
+                    repeat(minOf(removeCount, viewModel.chatMessages.size)) { viewModel.chatMessages.removeAt(0) }
+                }
+            }
         }
-        viewModel.newMessage.collect { (message, _, _) ->
-            messages.add(message)
-            while (messages.size > MAX_MESSAGES) messages.removeAt(0)
+        // recent messages arrive after connecting and go before what is already shown
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.addMessages.collect { (older, _) ->
+                messages.addAll(0, older.takeLast((MAX_MESSAGES - messages.size).coerceAtLeast(0)))
+            }
+        }
+        // cleared chat (disconnect): drop that many from the start
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.removeMessages.collect { count ->
+                repeat(minOf(count, messages.size)) { messages.removeAt(0) }
+            }
+        }
+        synchronized(viewModel.chatMessages) {
+            messages.addAll(0, viewModel.chatMessages.takeLast(100))
         }
     }
     LaunchedEffect(messages.size) {

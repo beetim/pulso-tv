@@ -2,8 +2,8 @@ package com.pulso.tv.ui.pulso
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
-import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -40,10 +40,22 @@ class PulsoHomeActivity : ComponentActivity() {
     private var reload by mutableIntStateOf(0)
     private var resumeTick by mutableIntStateOf(0)
 
+    /** When the shelves were last fetched; the Home refreshes itself when it comes back after a while. */
+    private var lastLoadAt = 0L
+
+    /** Repeated OK on a card must not stack duplicate screens. */
+    private val openGuard = OpenGuard()
+
     override fun onResume() {
         super.onResume()
+        PulsoUpdater.homeVisible = true
         resumeTick++
         PulsoUpdater.checkIfDue(applicationContext)
+    }
+
+    override fun onPause() {
+        PulsoUpdater.homeVisible = false
+        super.onPause()
     }
 
     private val loginLauncher =
@@ -51,7 +63,6 @@ class PulsoHomeActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = PulsoFont)) {
                 var shelves by remember { mutableStateOf<List<Shelf>>(emptyList()) }
@@ -63,8 +74,8 @@ class PulsoHomeActivity : ComponentActivity() {
                 LaunchedEffect(reload) {
                     loading = true
                     error = null
-                    runCatching { loadShelves() }
-                        .onSuccess { shelves = it }
+                    runCatching { loadShelves(shelves, silent = false) }
+                        .onSuccess { shelves = it; lastLoadAt = SystemClock.elapsedRealtime() }
                         .onFailure {
                             // runCatching catches CancellationException too, which would
                             // leave the error panel up over data that did load.
@@ -75,12 +86,23 @@ class PulsoHomeActivity : ComponentActivity() {
                     loading = false
                 }
 
-                // coming back from the player: refresh only the "Continuar assistindo" shelf
+                // coming back from the player: refresh only the "Continuar assistindo" shelf...
                 LaunchedEffect(resumeTick) {
                     if (shelves.isEmpty()) return@LaunchedEffect
                     val videos = withContext(Dispatchers.IO) { PulsoHistory.loadResume(applicationContext) }
                     val rest = shelves.filter { it.title != "Continuar assistindo" }
                     shelves = if (videos.isEmpty()) rest else listOf(Shelf("Continuar assistindo", videos = videos)) + rest
+
+                    // ...and reload everything quietly when the data is old. No loading flag, no
+                    // error panel: the focus and scroll stay where they are, the cards just update.
+                    if (!loading && SystemClock.elapsedRealtime() - lastLoadAt > STALE_MS) {
+                        runCatching { loadShelves(shelves, silent = true) }
+                            .onSuccess { shelves = it; lastLoadAt = SystemClock.elapsedRealtime() }
+                            .onFailure {
+                                if (it is CancellationException) throw it
+                                Log.w("PulsoHome", "atualização silenciosa falhou: ${it.message}")
+                            }
+                    }
                 }
 
                 PulsoHome(
@@ -96,20 +118,20 @@ class PulsoHomeActivity : ComponentActivity() {
                     onLogout = { signOut() },
                     onExit = { finish() },
                     onSettings = {
-                        startActivity(Intent(this@PulsoHomeActivity, PulsoSettingsActivity::class.java))
+                        if (openGuard.allow()) startActivity(Intent(this@PulsoHomeActivity, PulsoSettingsActivity::class.java))
                     },
                     onFollowedChannels = {
-                        startActivity(Intent(this@PulsoHomeActivity, PulsoFollowedActivity::class.java))
+                        if (openGuard.allow()) startActivity(Intent(this@PulsoHomeActivity, PulsoFollowedActivity::class.java))
                     },
                     onOpenVideo = { v ->
-                        startActivity(
+                        if (openGuard.allow()) startActivity(
                             Intent(this@PulsoHomeActivity, PulsoPlayerActivity::class.java)
                                 .putExtra(PulsoPlayerActivity.EXTRA_VIDEO, v)
                         )
                     },
                     onOpen = { openChannel(it) },
                     onOpenGame = { g ->
-                        startActivity(
+                        if (openGuard.allow()) startActivity(
                             Intent(this@PulsoHomeActivity, PulsoGameActivity::class.java)
                                 .putExtra(PulsoGameActivity.EXTRA_ID, g.id)
                                 .putExtra(PulsoGameActivity.EXTRA_SLUG, g.slug)
@@ -117,7 +139,7 @@ class PulsoHomeActivity : ComponentActivity() {
                         )
                     },
                     onSearch = {
-                        startActivity(Intent(this@PulsoHomeActivity, PulsoSearchActivity::class.java))
+                        if (openGuard.allow()) startActivity(Intent(this@PulsoHomeActivity, PulsoSearchActivity::class.java))
                     },
                 )
             }
@@ -145,7 +167,19 @@ class PulsoHomeActivity : ComponentActivity() {
     private fun isLoggedIn(): Boolean =
         !tokenPrefs().getString(C.USERNAME, null).isNullOrBlank()
 
-    private suspend fun loadShelves(): List<Shelf> = withContext(Dispatchers.IO) {
+    /** load() does not throw: it hands back LoadResult.Error, which must not look like "no data". */
+    private fun <T : Any> PagingSource.LoadResult<Int, T>.dataOrThrow(): List<T> = when (this) {
+        is PagingSource.LoadResult.Page -> data
+        is PagingSource.LoadResult.Error -> throw throwable
+        else -> emptyList()
+    }
+
+    /**
+     * Every network shelf is fetched on its own: one failing shelf (an expired token on
+     * "Seguindo", a hiccup on "Jogos") only drops that shelf — or keeps the one from
+     * [previous] — and the Home is an error only when all of them failed.
+     */
+    private suspend fun loadShelves(previous: List<Shelf>, silent: Boolean): List<Shelf> = withContext(Dispatchers.IO) {
         val context = applicationContext
         val module = (application as PulsoApp).pulsoModule
         val gqlHeaders = TwitchApiHelper.getGQLHeaders(context)
@@ -168,27 +202,43 @@ class PulsoHomeActivity : ComponentActivity() {
                 enableIntegrity = integrity,
                 networkLibrary = network,
             )
-            val page = source.load(
+            // an Error here would otherwise show "no live streams" whenever the network is down
+            return source.load(
                 PagingSource.LoadParams.Refresh(key = null, loadSize = 20, placeholdersEnabled = false)
-            )
-            // load() does not throw: it hands back LoadResult.Error. Swallowing it here
-            // would show "no live streams" whenever the network is down, with no retry.
-            return when (page) {
-                is PagingSource.LoadResult.Page -> page.data
-                is PagingSource.LoadResult.Error -> throw page.throwable
-                else -> emptyList()
+            ).dataOrThrow()
+        }
+
+        var attempts = 0
+        var failures = 0
+        var firstError: Throwable? = null
+        suspend fun <T> attempt(name: String, block: suspend () -> T): T? {
+            attempts++
+            return try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failures++
+                if (firstError == null) firstError = e
+                Log.w("PulsoHome", "$name falhou: ${e.message}")
+                null
             }
         }
 
         val shelves = mutableListOf<Shelf>()
+        // a shelf that failed to refresh keeps what the screen already had
+        fun keepOld(title: String) {
+            previous.firstOrNull { it.title == title }?.let { shelves += it }
+        }
 
         // recorded videos the user stopped in the middle of
         PulsoHistory.loadResume(context).takeIf { it.isNotEmpty() }?.let {
             shelves += Shelf("Continuar assistindo", videos = it)
         }
 
+        var followedFailed = false
         if (isLoggedIn()) {
-            runCatching {
+            val followed = attempt("seguindo") {
                 val source = FollowedStreamsDataSource(
                     userId = tokenPrefs().getString(C.USER_ID, null),
                     localChannelFollowsRepository = module.localChannelFollowsRepository,
@@ -199,15 +249,19 @@ class PulsoHomeActivity : ComponentActivity() {
                     enableIntegrity = integrity,
                     networkLibrary = network,
                 )
-                val page = source.load(
+                source.load(
                     PagingSource.LoadParams.Refresh(key = null, loadSize = 20, placeholdersEnabled = false)
-                )
-                if (page is PagingSource.LoadResult.Page) page.data else emptyList()
-            }.onSuccess { if (it.isNotEmpty()) shelves += Shelf("Seguindo", it) }
-                .onFailure { Log.w("PulsoHome", "seguindo falhou: ${it.message}") }
+                ).dataOrThrow()
+            }
+            if (followed == null) {
+                followedFailed = true
+                keepOld("Seguindo")
+            } else if (followed.isNotEmpty()) {
+                shelves += Shelf("Seguindo", followed)
+            }
         }
 
-        runCatching {
+        val games = attempt("jogos") {
             val source = com.pulso.tv.repository.datasource.GamesDataSource(
                 tags = null,
                 gqlHeaders = gqlHeaders,
@@ -217,19 +271,36 @@ class PulsoHomeActivity : ComponentActivity() {
                 enableIntegrity = integrity,
                 networkLibrary = network,
             )
-            val page = source.load(
+            source.load(
                 PagingSource.LoadParams.Refresh(key = null, loadSize = 20, placeholdersEnabled = false)
-            )
-            if (page is PagingSource.LoadResult.Page) page.data else emptyList()
-        }.onSuccess { if (it.isNotEmpty()) shelves += Shelf("Jogos", games = it) }
-            .onFailure { Log.w("PulsoHome", "jogos falhou: ${it.message}") }
+            ).dataOrThrow()
+        }
+        if (games == null) keepOld("Jogos") else if (games.isNotEmpty()) shelves += Shelf("Jogos", games = games)
 
-        shelves += Shelf("Mais vistos", streamsPage(StreamSort.VIEWER_COUNT, "VIEWER_COUNT"))
+        val top = attempt("mais vistos") { streamsPage(StreamSort.VIEWER_COUNT, "VIEWER_COUNT") }
+        if (top == null) keepOld("Mais vistos") else if (top.isNotEmpty()) shelves += Shelf("Mais vistos", top)
+
         // recommendations come from the user's own language; any language if that is empty
-        val recommended = runCatching { streamsPage(StreamSort.RECENT, "RECENT", local = true) }
-            .getOrDefault(emptyList())
-            .ifEmpty { streamsPage(StreamSort.RECENT, "RECENT") }
-        shelves += Shelf("Recomendados", recommended)
+        val recommended = attempt("recomendados") {
+            val local = try {
+                streamsPage(StreamSort.RECENT, "RECENT", local = true)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+            local.ifEmpty { streamsPage(StreamSort.RECENT, "RECENT") }
+        }
+        if (recommended == null) keepOld("Recomendados") else if (recommended.isNotEmpty()) shelves += Shelf("Recomendados", recommended)
+
+        // an error only when there is nothing to show because everything failed
+        if (attempts > 0 && failures == attempts) throw firstError ?: IllegalStateException("falha ao carregar")
+
+        if (followedFailed && !silent) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, tr("Não foi possível carregar os canais que você segue"), Toast.LENGTH_LONG).show()
+            }
+        }
 
         shelves.filter { it.streams.isNotEmpty() || it.games.isNotEmpty() || it.videos.isNotEmpty() }
     }
@@ -237,9 +308,15 @@ class PulsoHomeActivity : ComponentActivity() {
     private fun openChannel(stream: Stream) {
         val login = stream.channelLogin
         if (login.isNullOrBlank()) return
+        if (!openGuard.allow()) return
         val intent = Intent(this, PulsoPlayerActivity::class.java)
             .putExtra(PulsoPlayerActivity.EXTRA_STREAM, stream)
         runCatching { startActivity(intent) }
             .onFailure { Log.w("PulsoHome", "nao consegui abrir o canal $login", it) }
+    }
+
+    private companion object {
+        /** Older than this when the Home comes back to the front: reload the shelves. */
+        const val STALE_MS = 5 * 60 * 1000L
     }
 }

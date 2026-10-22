@@ -124,7 +124,11 @@ fun tr(s: String): String {
     return out
 }
 
-/** Drop-in for material3 Text that translates plain strings. */
+/**
+ * Drop-in for material3 Text that translates plain strings. Pass `translate = false` for
+ * content that comes from the network (stream titles, channel and game names): the regex
+ * rules of [tr] would otherwise mangle "1000 seguidores" or a game named like a key.
+ */
 @Composable
 fun Text(
     text: String,
@@ -138,9 +142,10 @@ fun Text(
     overflow: TextOverflow = TextOverflow.Clip,
     softWrap: Boolean = true,
     maxLines: Int = Int.MAX_VALUE,
+    translate: Boolean = true,
 ) {
     M3Text(
-        text = tr(text),
+        text = if (translate) tr(text) else text,
         modifier = modifier,
         color = color,
         fontSize = fontSize,

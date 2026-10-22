@@ -563,25 +563,29 @@ class PlayerViewModel(
         }
     }
 
-    fun isFollowingChannel(userId: String?, channelId: String?, channelLogin: String?, setting: Int, networkLibrary: String?, gqlHeaders: Map<String, String>, helixHeaders: Map<String, String>) {
-        if (_isFollowing.value == null) {
-            viewModelScope.launch {
-                try {
-                    if (!channelId.isNullOrBlank()) {
-                        _isFollowing.value = if (setting == 0 && !gqlHeaders[C.HEADER_TOKEN].isNullOrBlank() && userId != channelId) {
-                            graphQLRepository.loadQueryFollowingUser(
-                                networkLibrary = networkLibrary,
-                                headers = gqlHeaders,
-                                id = channelId,
-                                login = channelLogin.takeIf { channelId.isBlank() },
-                            ).data?.user?.self?.follower?.followedAt != null
-                        } else {
-                            localChannelFollowsRepository.getById(channelId) != null
-                        }
-                    }
-                } catch (e: Exception) {
+    private var followCheck: Job? = null
 
+    /** Always re-checks (a follow done elsewhere, a login, coming back from the player); a failure keeps the last known state. */
+    fun isFollowingChannel(userId: String?, channelId: String?, channelLogin: String?, setting: Int, networkLibrary: String?, gqlHeaders: Map<String, String>, helixHeaders: Map<String, String>) {
+        followCheck?.cancel()
+        followCheck = viewModelScope.launch {
+            try {
+                if (!channelId.isNullOrBlank()) {
+                    _isFollowing.value = if (setting == 0 && !gqlHeaders[C.HEADER_TOKEN].isNullOrBlank() && userId != channelId) {
+                        graphQLRepository.loadQueryFollowingUser(
+                            networkLibrary = networkLibrary,
+                            headers = gqlHeaders,
+                            id = channelId,
+                            login = channelLogin.takeIf { channelId.isBlank() },
+                        ).data?.user?.self?.follower?.followedAt != null
+                    } else {
+                        localChannelFollowsRepository.getById(channelId) != null
+                    }
                 }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // keep the previous value instead of leaving the button stuck
             }
         }
     }
@@ -628,8 +632,10 @@ class PlayerViewModel(
                         }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-
+                follow.value = Pair(true, e.message ?: "erro") // shown as a toast, not swallowed
             }
         }
     }
@@ -660,8 +666,10 @@ class PlayerViewModel(
                         notificationsRepository.deleteUser(NotificationUser(channelId))
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-
+                follow.value = Pair(false, e.message ?: "erro") // shown as a toast, not swallowed
             }
         }
     }

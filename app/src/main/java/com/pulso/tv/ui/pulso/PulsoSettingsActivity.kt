@@ -1,7 +1,6 @@
 package com.pulso.tv.ui.pulso
 
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -49,7 +48,6 @@ class PulsoSettingsActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = PulsoFont)) {
                 SettingsScreen()

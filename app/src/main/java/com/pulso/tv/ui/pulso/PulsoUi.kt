@@ -56,6 +56,7 @@ fun PulsoCard(
     bottomStart: String? = null,
     bottomEnd: String? = null,
     focusRequester: FocusRequester? = null,
+    translateSubtitle: Boolean = true,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -114,6 +115,7 @@ fun PulsoCard(
                     if (!bottomEnd.isNullOrBlank()) PulsoChip(bottomEnd, Modifier.align(Alignment.BottomEnd).padding(8.dp))
                 }
                 Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp)) {
+                    // the title is remote content (stream/video/channel name): never run it through tr()
                     Text(
                         title,
                         color = Pulso.TextPrimary,
@@ -122,10 +124,14 @@ fun PulsoCard(
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.height(36.dp)
+                        modifier = Modifier.height(36.dp),
+                        translate = false,
                     )
                     Spacer(Modifier.height(4.dp))
-                    Text(subtitle, color = Pulso.TextSecondary, fontSize = Pulso.Sp.channel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        subtitle, color = Pulso.TextSecondary, fontSize = Pulso.Sp.channel, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, translate = translateSubtitle,
+                    )
                 }
             }
         }
@@ -189,6 +195,7 @@ fun PulsoGameCard(
                         name, color = Pulso.TextPrimary, fontSize = 12.sp, lineHeight = 15.sp,
                         fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.height(30.dp),
+                        translate = false, // game names are remote content
                     )
                     Text(viewers, color = Pulso.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -224,10 +231,12 @@ fun PulsoPill(
     enabled: Boolean = true,
     height: androidx.compose.ui.unit.Dp = 40.dp,
     requester: FocusRequester? = null,
+    translate: Boolean = true,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     val latestClick by rememberUpdatedState(onClick)
+    val isEnabled by rememberUpdatedState(enabled)
     val shape = RoundedCornerShape(50)
     val bg = when {
         primary -> Pulso.Yellow
@@ -242,26 +251,25 @@ fun PulsoPill(
     Box(
         modifier
             .alpha(if (enabled) 1f else 0.4f)
-            .then(if (requester != null && enabled) Modifier.focusRequester(requester) else Modifier)
-            .then(
-                if (enabled) Modifier
-                    .onFocusChanged { focused = it.isFocused }
-                    .focusable()
-                    .onKeyEvent { e ->
-                        if (e.type == KeyEventType.KeyUp && (e.key == Key.DirectionCenter || e.key == Key.Enter)) {
-                            latestClick(); true
-                        } else false
-                    }
-                    .pointerInput(Unit) { detectTapGestures { latestClick() } }
-                else Modifier
-            )
+            .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
+            // Disabled stays focusable but inert: if the focused button turns off (e.g. "Verificar
+            // atualizações" while checking) the focus must not vanish with it.
+            .onFocusChanged { focused = it.isFocused }
+            .focusable()
+            .onKeyEvent { e ->
+                if (e.type == KeyEventType.KeyUp && (e.key == Key.DirectionCenter || e.key == Key.Enter)) {
+                    if (isEnabled) latestClick()
+                    true
+                } else false
+            }
+            .pointerInput(Unit) { detectTapGestures { if (isEnabled) latestClick() } }
             .height(height)
             .then(if (focused) Modifier.border(Pulso.Dp.ringWidth, Pulso.FocusRing, shape) else Modifier)
             .background(bg, shape)
             .padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = fg, fontSize = Pulso.Sp.nav, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(label, color = fg, fontSize = Pulso.Sp.nav, fontWeight = FontWeight.SemiBold, maxLines = 1, translate = translate)
     }
 }
 
@@ -292,8 +300,26 @@ fun PulsoScreenMessage(text: String, modifier: Modifier = Modifier) {
 // ---- formatting ----------------------------------------------------------
 
 /** "mesa_redonda está jogando League of Legends" (just the name when the game is unknown). */
-fun playingText(name: String?, game: String?): String =
-    if (game.isNullOrBlank()) name.orEmpty() else "${name.orEmpty()} está jogando $game"
+fun playingText(name: String?, game: String?): String {
+    // already translated: the names are remote, so the caller must show it with translate = false.
+    // Translating a template with placeholders keeps each language's own word order.
+    if (game.isNullOrBlank()) return name.orEmpty()
+    return tr("\u0001 está jogando \u0002").replace("\u0001", name.orEmpty()).replace("\u0002", game)
+}
+
+/**
+ * Swallows repeated OK presses: a second tap on a card within [windowMs] would otherwise
+ * stack a duplicate screen on top of the first one while it is still starting.
+ */
+class OpenGuard(private val windowMs: Long = 600) {
+    private var last = 0L
+    fun allow(): Boolean {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - last < windowMs) return false
+        last = now
+        return true
+    }
+}
 
 /** 48200 -> "48,2 mil" (pt) · "48.2K" (en) · "4.8万" (ja); rules live in PulsoLang. */
 fun compactCount(n: Int): String = PulsoLang.compact(n)

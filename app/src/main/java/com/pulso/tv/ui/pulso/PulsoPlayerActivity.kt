@@ -17,6 +17,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -50,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -68,9 +70,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.HttpDataSource
 import com.pulso.tv.PulsoApp
 import com.pulso.tv.model.PlaybackState
+import com.pulso.tv.model.VideoPosition
 import com.pulso.tv.model.VideoQuality
 import com.pulso.tv.model.ui.Clip
 import com.pulso.tv.model.ui.Stream
@@ -107,15 +112,18 @@ class PulsoPlayerActivity : ComponentActivity() {
     private var playing by mutableStateOf(false)
     private var buffering by mutableStateOf(true)
     private var chatStarted = false
+    private var everReady = false          // the player reached READY at least once (guards the resume point)
+    private var resumeOnStart = false      // was playing when the activity stopped (Home button, standby)
+    private var loadAttempt by mutableIntStateOf(0)  // bumped on retry to restart the loading timeout
 
     // bumped by any key, tap or mouse move so the chrome comes back and its timer restarts
     private var interaction by mutableIntStateOf(0)
 
     // null | "options" | "quality" | "aspect" | "timer" | "login"
     private var menu by mutableStateOf<String?>(null)
-    private var keepChromeHidden by mutableStateOf(false)
     private var aspect by mutableIntStateOf(0)         // 0 automatic 16:9 · 1 4:3 · 2 fill
     private var sleepMinutes by mutableIntStateOf(0)   // 0 = off
+    private var sleepStart by mutableLongStateOf(0L)   // restarts the timer even when the same value is picked again
     private var isVod = false
     private var isClip = false
     private var muted by mutableStateOf(false)
@@ -124,15 +132,35 @@ class PulsoPlayerActivity : ComponentActivity() {
     private var duration by mutableLongStateOf(0L)
     private var playerError by mutableStateOf<String?>(null)
     private var ended by mutableStateOf(false)
+    private var streamOffline by mutableStateOf(false) // live stream answered 404: the channel stopped broadcasting
     private var chatVisible by mutableStateOf(true)
     private var fullscreen by mutableStateOf(false)
 
+    // focus targets, so closing a dialog or overlay puts the focus back on the control that opened it
+    private val playReq = FocusRequester()
+    private val followReq = FocusRequester()
+    private val optionsReq = FocusRequester()
+    private val chatPillReq = FocusRequester()
+    private var opener = "play"   // play | follow | options | chat
+    private var loggedInAtLaunch = false
+
     private val loginLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { tick++ }
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            tick++
+            // logging in from the player: the follow state and the chat (which can now write) are stale
+            if (isLoggedIn() && !loggedInAtLaunch) {
+                loadFollowState()
+                val svc = service
+                val login = svc?.channelLogin
+                if (!isVod && chatStarted && svc != null && !login.isNullOrBlank()) {
+                    chatViewModel.startLiveChat(svc.channelId, login)
+                }
+            }
+        }
 
     private val listener = object : ExoPlayerService.Listener {
         override fun started() { runOnUiThread { tick++; startChatIfReady() } }
-        override fun loaded() { runOnUiThread { tick++ } }
+        override fun loaded() { runOnUiThread { tick++; applyMute() } }
         override fun changePlayerMode() {}
         override fun toast(resId: Int, duration: Int) {
             runOnUiThread { Toast.makeText(this@PulsoPlayerActivity, resId, duration).show() }
@@ -260,11 +288,20 @@ class PulsoPlayerActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             repo.savePlaybackStates(listOf(state))
+            // The engine prefers its own saved position over the one in the state: a finished video would
+            // reopen at the end. PulsoHistory is the source of truth (0 when finished or barely started).
+            video?.id?.toLongOrNull()?.let {
+                repo.saveVideoPosition(VideoPosition(it, PulsoHistory.position(this@PulsoPlayerActivity, video?.id)))
+            }
             bindToService()
         }
     }
 
     private fun bindToService() {
+        if (isFinishing) {
+            stopService(Intent(this, ExoPlayerService::class.java))
+            return
+        }
         val conn = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                 val svc = (binder as ExoPlayerService.ServiceBinder).getService()
@@ -277,10 +314,16 @@ class PulsoPlayerActivity : ComponentActivity() {
                         buffering = playbackState == Player.STATE_BUFFERING
                         playing = player?.isPlaying == true
                         ended = playbackState == Player.STATE_ENDED
-                        if (playbackState == Player.STATE_READY) playerError = null
+                        if (playbackState == Player.STATE_READY) {
+                            everReady = true
+                            playerError = null
+                            streamOffline = false
+                            applyMute() // the engine reapplies its own volume when it loads
+                        }
                     }
-                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        playerError = error.message ?: "erro de reprodução"
+                    override fun onPlayerError(error: PlaybackException) {
+                        if (!isVod && httpCode(error) == 404) streamOffline = true
+                        else playerError = friendlyError(error)
                     }
                     override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
                     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -289,6 +332,13 @@ class PulsoPlayerActivity : ComponentActivity() {
                 }
                 player?.addListener(l)
                 playerListener = l
+                // a recreated activity attaches to a player that is already running: sync instead of waiting for an event
+                player?.let {
+                    buffering = it.playbackState != Player.STATE_READY && it.playbackState != Player.STATE_ENDED
+                    playing = it.isPlaying
+                    ended = it.playbackState == Player.STATE_ENDED
+                    if (it.playbackState == Player.STATE_READY) everReady = true
+                }
                 attachSurface()
                 if (svc.started) startChatIfReady()
                 tick++
@@ -329,9 +379,57 @@ class PulsoPlayerActivity : ComponentActivity() {
     private fun toggleMute() {
         val svc = service ?: return
         muted = !muted
-        val v = if (muted) 0f else 1f
+        val v = if (muted) 0f else prefs().getInt(C.PLAYER_VOLUME, 100) / 100f
         svc.player?.volume = v
         svc.secondaryPlayer?.volume = v
+    }
+
+    /** The engine resets the volume when it (re)loads; keep the mute on top of that. */
+    private fun applyMute() {
+        if (!muted) return
+        val svc = service ?: return
+        svc.player?.volume = 0f
+        svc.secondaryPlayer?.volume = 0f
+    }
+
+    private fun toggleChat() {
+        // in full screen the chat is hidden anyway: the first press must bring it back, not just flip the flag
+        if (fullscreen) { fullscreen = false; chatVisible = true } else chatVisible = !chatVisible
+    }
+
+    private fun httpCode(error: PlaybackException): Int =
+        generateSequence<Throwable>(error) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()?.responseCode ?: 0
+
+    /** Plain Portuguese instead of the engine's technical English message. */
+    private fun friendlyError(error: PlaybackException): String {
+        val code = httpCode(error)
+        return when {
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                "Sem conexão com a internet."
+            code == 403 -> "Acesso negado a este conteúdo."
+            code == 404 -> "Conteúdo não encontrado."
+            code >= 400 -> "O servidor recusou a conexão."
+            error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ->
+                "Não foi possível decodificar o vídeo."
+            error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ||
+                error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ->
+                "O vídeo recebido é inválido."
+            else -> "Erro de reprodução."
+        }
+    }
+
+    /** Restarts the load from scratch (new token and playlist for a live stream) and re-arms the timeout. */
+    private fun retryLoad() {
+        playerError = null
+        streamOffline = false
+        everReady = false
+        buffering = true
+        loadAttempt++
+        val svc = service ?: return
+        if (isVod) svc.retry(if (isClip) "refreshClip" else "refreshVideo") else svc.restartPlayer()
     }
 
     /** "Ir para o canal": opens the channel screen and closes the player. */
@@ -340,6 +438,8 @@ class PulsoPlayerActivity : ComponentActivity() {
         val login = svc.channelLogin ?: return
         startActivity(
             Intent(this, PulsoChannelActivity::class.java)
+                // reuse the channel screen that opened this player instead of stacking a second one
+                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                 .putExtra(PulsoChannelActivity.EXTRA_LOGIN, login)
                 .putExtra(PulsoChannelActivity.EXTRA_ID, svc.channelId)
                 .putExtra(PulsoChannelActivity.EXTRA_NAME, svc.channelName)
@@ -350,19 +450,19 @@ class PulsoPlayerActivity : ComponentActivity() {
 
     /** Voltar: closes a submenu, then the panel, then leaves the player. */
     private fun handleBack() {
+        // a transient error over an open panel is dismissed first, so one Back doesn't skip two levels
+        if (playerError != null && menu != null) { playerError = null; return }
         when (menu) {
             null -> leave()
             "quality", "aspect", "timer" -> menu = "options"
-            else -> {
-                // closing the panel returns to the bare player, controls hidden
-                keepChromeHidden = true
-                menu = null
-            }
+            else -> menu = null // closing the panel shows the controls again, focus back on the opener
         }
     }
 
     private fun saveVodProgress() {
         val v = vod ?: return
+        // before the first READY the position is 0 and the duration unknown: saving would erase the resume point
+        if (!everReady || duration <= 0) return
         PulsoHistory.saveProgress(this, v, position, duration)
     }
 
@@ -377,8 +477,27 @@ class PulsoPlayerActivity : ComponentActivity() {
         connection?.let { runCatching { unbindService(it) } }
         connection = null
         svc?.stopSelf()
+        // even if the service never connected, it was started and would keep playing with no UI
+        stopService(Intent(this, ExoPlayerService::class.java))
         service = null
         finish()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (resumeOnStart) {
+            resumeOnStart = false
+            service?.let { it.player?.play(); it.secondaryPlayer?.play() }
+        }
+    }
+
+    override fun onStop() {
+        // Home button / TV standby: don't keep playing (and talking) in the background
+        val svc = service
+        resumeOnStart = (svc?.secondaryPlayer ?: svc?.player)?.playWhenReady == true
+        saveVodProgress()
+        svc?.pause()
+        super.onStop()
     }
 
     override fun onDestroy() {
@@ -390,6 +509,7 @@ class PulsoPlayerActivity : ComponentActivity() {
             connection = null
             if (isFinishing) svc?.stopSelf()
         }
+        if (isFinishing) stopService(Intent(this, ExoPlayerService::class.java))
         super.onDestroy()
     }
 
@@ -398,6 +518,20 @@ class PulsoPlayerActivity : ComponentActivity() {
     private fun isLoggedIn() = !tokenPrefs().getString(C.USERNAME, null).isNullOrBlank()
 
     private fun followSetting() = prefs().getString(C.UI_FOLLOW_BUTTON, "0")?.toIntOrNull() ?: 0
+
+    private fun loadFollowState() {
+        val s = service ?: return
+        if (s.channelId.isNullOrBlank()) return
+        viewModel.isFollowingChannel(
+            tokenPrefs().getString(C.USER_ID, null),
+            s.channelId,
+            s.channelLogin,
+            followSetting(),
+            prefs().getString(C.NETWORK_LIBRARY, C.OKHTTP),
+            TwitchApiHelper.getGQLHeaders(this, true),
+            TwitchApiHelper.getHelixHeaders(this),
+        )
+    }
 
     private fun toggleFollow(following: Boolean) {
         val svc = service ?: return
@@ -437,19 +571,39 @@ class PulsoPlayerActivity : ComponentActivity() {
         val svc = service
         @Suppress("UNUSED_EXPRESSION") tick
 
+        // while a panel, dialog or status screen is up, the controls behind the scrim must not take focus
+        val overlayUp = ended || streamOffline || playerError != null
+        val blocked = menu != null || overlayUp
+
         // load follow state once the channel is known
-        LaunchedEffect(svc?.channelId) {
-            val s = svc ?: return@LaunchedEffect
-            if (s.channelId.isNullOrBlank()) return@LaunchedEffect
-            viewModel.isFollowingChannel(
-                tokenPrefs().getString(C.USER_ID, null),
-                s.channelId,
-                s.channelLogin,
-                followSetting(),
-                prefs().getString(C.NETWORK_LIBRARY, C.OKHTTP),
-                TwitchApiHelper.getGQLHeaders(this@PulsoPlayerActivity, true),
-                TwitchApiHelper.getHelixHeaders(this@PulsoPlayerActivity),
-            )
+        LaunchedEffect(svc?.channelId) { loadFollowState() }
+
+        // a panel, dialog or status screen closed: show the controls and put the focus back where it came from
+        var wasBlocked by remember { mutableStateOf(false) }
+        LaunchedEffect(blocked) {
+            if (!blocked && wasBlocked) {
+                interaction++
+                delay(50)
+                runCatching {
+                    when (opener) {
+                        "follow" -> followReq
+                        "options" -> optionsReq
+                        "chat" -> chatPillReq
+                        else -> playReq
+                    }.requestFocus()
+                }
+                opener = "play"
+            }
+            wasBlocked = blocked
+        }
+
+        // nothing ready after 15 s (loader returned nothing, dead network): say so instead of "Carregando…" forever
+        LaunchedEffect(buffering, loadAttempt) {
+            if (!buffering && everReady) return@LaunchedEffect
+            delay(15_000)
+            if (playerError == null && !ended && !streamOffline && (buffering || !everReady)) {
+                playerError = "Demorou demais para carregar."
+            }
         }
         LaunchedEffect(followEvent) {
             followEvent?.let { (isNowFollowing, error) ->
@@ -463,11 +617,7 @@ class PulsoPlayerActivity : ComponentActivity() {
         }
 
         // chrome hides by itself after a few seconds without input
-        LaunchedEffect(interaction, menu, keepChromeHidden) {
-            if (menu == null && keepChromeHidden) {
-                chromeVisible = false
-                return@LaunchedEffect
-            }
+        LaunchedEffect(interaction, menu) {
             chromeVisible = true
             if (menu == null) {
                 delay(5000)
@@ -476,7 +626,7 @@ class PulsoPlayerActivity : ComponentActivity() {
         }
 
         // sleep timer: leave the player when it runs out
-        LaunchedEffect(sleepMinutes) {
+        LaunchedEffect(sleepMinutes, sleepStart) {
             if (sleepMinutes > 0) {
                 delay(sleepMinutes * 60_000L)
                 leave()
@@ -503,6 +653,7 @@ class PulsoPlayerActivity : ComponentActivity() {
         Row(
             Modifier
                 .fillMaxSize()
+                .focusProperties { canFocus = !blocked }
                 .pointerInput(Unit) {
                     detectTapGestures { interaction++ }
                 }
@@ -548,17 +699,21 @@ class PulsoPlayerActivity : ComponentActivity() {
                         viewers = (svc?.viewerCount ?: stream.viewerCount)?.let { formatViewers(it) }.orEmpty(),
                         playing = playing,
                         following = following == true,
-                        chatVisible = chatVisible,
+                        chatVisible = chatVisible && !fullscreen,
                         fullscreen = fullscreen,
                         onInteract = { interaction++ },
                         onBack = { leave() },
                         onPlayPause = { service?.togglePause() },
                         onFollow = {
-                            if (!isLoggedIn()) menu = "login" else toggleFollow(following == true)
+                            if (!isLoggedIn()) {
+                                opener = "follow"
+                                loggedInAtLaunch = false
+                                menu = "login"
+                            } else toggleFollow(following == true)
                         },
-                        onChat = { chatVisible = !chatVisible; if (chatVisible) fullscreen = false },
+                        onChat = { toggleChat() },
                         onChannel = { openChannelPage() },
-                        onOptions = { menu = "options" },
+                        onOptions = { opener = "options"; menu = "options" },
                         onMute = { toggleMute() },
                         onFullscreen = { fullscreen = !fullscreen },
                         menuOpen = menu != null,
@@ -571,8 +726,11 @@ class PulsoPlayerActivity : ComponentActivity() {
                     Box(Modifier.fillMaxWidth().padding(10.dp)) {
                         PulsoPill(
                             "Escrever no chat", height = 36.dp, modifier = Modifier.fillMaxWidth(),
+                            requester = chatPillReq,
                         ) {
                             interaction++
+                            opener = "chat"
+                            loggedInAtLaunch = false
                             menu = if (isLoggedIn()) "compose" else "login"
                         }
                     }
@@ -588,16 +746,17 @@ class PulsoPlayerActivity : ComponentActivity() {
     @Composable
     private fun StatusOverlay(svc: ExoPlayerService?) {
         val err = playerError
-        if (!ended && err == null) return
+        val over = ended || streamOffline
+        if (!over && err == null) return
         val first = remember { FocusRequester() }
-        LaunchedEffect(ended, err) { runCatching { first.requestFocus() } }
+        LaunchedEffect(over, err) { runCatching { first.requestFocus() } }
         val (title, body) = when {
-            ended && !isVod -> "Transmissão encerrada" to "${svc?.channelName ?: "O canal"} parou de transmitir."
-            ended -> "Fim do vídeo" to "Você chegou ao final."
+            over && !isVod -> "Transmissão encerrada" to "${svc?.channelName ?: "O canal"} parou de transmitir."
+            over -> "Fim do vídeo" to "Você chegou ao final."
             isVod -> "Não foi possível carregar o vídeo" to (err ?: "")
             else -> "Não foi possível carregar a transmissão" to (err ?: "")
         }
-        Box(Modifier.fillMaxSize().background(Color(0xE6000000)), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxSize().background(Color(0xE6000000)).focusGroup(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(title, color = Pulso.TextPrimary, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                 if (body.isNotBlank()) {
@@ -605,16 +764,13 @@ class PulsoPlayerActivity : ComponentActivity() {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 12.dp)) {
                     when {
-                        ended && !isVod -> PulsoPill("Ir para o canal", primary = true, height = 38.dp, requester = first) { openChannelPage() }
-                        ended -> PulsoPill("Ver de novo", primary = true, height = 38.dp, requester = first) {
+                        over && !isVod -> PulsoPill("Ir para o canal", primary = true, height = 38.dp, requester = first) { openChannelPage() }
+                        over -> PulsoPill("Ver de novo", primary = true, height = 38.dp, requester = first) {
                             svc?.seekTo(0L)
                             svc?.player?.play()
                             ended = false
                         }
-                        else -> PulsoPill("Tentar de novo", primary = true, height = 38.dp, requester = first) {
-                            playerError = null
-                            svc?.retry(if (isClip) "refreshClip" else if (isVod) "refreshVideo" else "refreshStream")
-                        }
+                        else -> PulsoPill("Tentar de novo", primary = true, height = 38.dp, requester = first) { retryLoad() }
                     }
                     PulsoPill("Voltar", height = 38.dp) { leave() }
                 }
@@ -629,7 +785,11 @@ class PulsoPlayerActivity : ComponentActivity() {
         var widthPx by remember { mutableIntStateOf(1) }
         val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
         fun seekBy(delta: Long) {
-            service?.seekTo((position + delta).coerceIn(0L, duration.coerceAtLeast(0L)))
+            // the 500 ms polled position is stale when keys repeat quickly: ask the player at keypress time
+            val p = service?.let { it.secondaryPlayer ?: it.player }
+            val now = p?.currentPosition?.takeIf { it >= 0 } ?: position
+            val total = p?.duration?.takeIf { it != androidx.media3.common.C.TIME_UNSET } ?: duration
+            service?.seekTo((now + delta).coerceIn(0L, total.coerceAtLeast(0L)))
             onInteract()
         }
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -696,9 +856,8 @@ class PulsoPlayerActivity : ComponentActivity() {
                 rows = listOf(
                     MenuRow("Qualidade", svc?.quality?.let { qualityLabel(it) } ?: "—") { menu = "quality" },
                     MenuRow("Proporção", aspectLabel()) { menu = "aspect" },
-                    MenuRow("Chat", if (isVod) "Indisponível" else if (chatVisible) "Ocultar" else "Mostrar", enabled = !isVod) {
-                        chatVisible = !chatVisible
-                        if (chatVisible) fullscreen = false
+                    MenuRow("Chat", if (isVod) "Indisponível" else if (chatVisible && !fullscreen) "Ocultar" else "Mostrar", enabled = !isVod) {
+                        toggleChat()
                     },
                     MenuRow("Legendas", "Indisponível", enabled = false),
                     MenuRow("Temporizador", timerLabel()) { menu = "timer" },
@@ -709,6 +868,7 @@ class PulsoPlayerActivity : ComponentActivity() {
                 hint = "Escolher qualidade",
                 rows = if (qualities.isEmpty()) listOf(MenuRow("Carregando qualidades…", enabled = false)) else qualities.map { q ->
                     MenuRow(qualityLabel(q), selected = q.name == svc?.quality?.name && q.url == svc?.quality?.url) {
+                        playerError = null // an error from before the change must not cover the panel
                         service?.changeQuality(q)
                         menu = "options"
                     }
@@ -728,17 +888,18 @@ class PulsoPlayerActivity : ComponentActivity() {
                     MenuRow(
                         when (m) { 0 -> "Desligado"; 60 -> "1 hora"; 120 -> "2 horas"; else -> "$m min" },
                         selected = sleepMinutes == m,
-                    ) { sleepMinutes = m; menu = "options" }
+                    ) { sleepMinutes = m; sleepStart = System.currentTimeMillis(); menu = "options" }
                 },
             )
             "compose" -> ComposeDialog(
                 onSend = { text ->
-                    sendChat(text)
-                    menu = null
+                    // empty text keeps the dialog open; the result of the send shows up in the chat itself
+                    if (sendChat(text)) menu = null
                 },
             )
             "login" -> LoginDialog(
                 onLogin = {
+                    loggedInAtLaunch = isLoggedIn()
                     menu = null
                     loginLauncher.launch(Intent(this@PulsoPlayerActivity, PulsoLoginActivity::class.java))
                 },
@@ -752,9 +913,10 @@ class PulsoPlayerActivity : ComponentActivity() {
     private fun MenuPanel(title: String, hint: String, rows: List<MenuRow>) {
         val firstEnabled = rows.indexOfFirst { it.enabled }.coerceAtLeast(0)
         val first = remember(title) { FocusRequester() }
-        LaunchedEffect(title) { runCatching { first.requestFocus() } }
+        // also when the first enabled row only shows up later (qualities still loading when the panel opened)
+        LaunchedEffect(title, rows.size, rows.getOrNull(firstEnabled)?.enabled) { runCatching { first.requestFocus() } }
         Box(
-            Modifier.fillMaxSize().background(Color(0xB3000000))
+            Modifier.fillMaxSize().background(Color(0xB3000000)).focusGroup()
                 .pointerInput(Unit) { detectTapGestures { handleBack() } }
         ) {
             Column(
@@ -813,7 +975,7 @@ class PulsoPlayerActivity : ComponentActivity() {
             val fg = if (focused) Pulso.Background else Pulso.TextPrimary
             val sub = if (focused) Pulso.Background else Pulso.TextSecondary
             Text(
-                (if (row.selected) "✓  " else "") + row.label,
+                (if (row.selected) "✓  " else "") + tr(row.label), // the check prefix would defeat the translation lookup
                 color = fg, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f), maxLines = 1,
             )
@@ -857,15 +1019,8 @@ class PulsoPlayerActivity : ComponentActivity() {
         onFullscreen: () -> Unit,
         menuOpen: Boolean,
     ) {
-        val first = remember { FocusRequester() }
-        val optionsButton = remember { FocusRequester() }
-        LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
-        // Voltar closes the options panel and returns focus to the Opções button
-        var wasOpen by remember { mutableStateOf(false) }
-        LaunchedEffect(menuOpen) {
-            if (!menuOpen && wasOpen) runCatching { optionsButton.requestFocus() }
-            wasOpen = menuOpen
-        }
+        // (re)appearing controls start on play/pause; closing a panel or dialog is handled in the screen
+        LaunchedEffect(Unit) { runCatching { playReq.requestFocus() } }
         Box(Modifier.fillMaxSize()) {
             Box(
                 Modifier.fillMaxWidth().height(120.dp).align(Alignment.TopCenter)
@@ -889,7 +1044,7 @@ class PulsoPlayerActivity : ComponentActivity() {
                             ) { Text("AO VIVO", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
                             Box(Modifier.width(8.dp))
                         }
-                        Text(viewers, color = Pulso.TextSecondary, fontSize = 14.sp)
+                        Text(viewers, color = Pulso.TextSecondary, fontSize = 14.sp, translate = false)
                     }
                 }
             }
@@ -913,12 +1068,12 @@ class PulsoPlayerActivity : ComponentActivity() {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     ChromeButton(
-                        if (playing) "Pausar" else "Continuar", false, onPlayPause, onInteract, first,
+                        if (playing) "Pausar" else "Continuar", false, onPlayPause, onInteract, playReq,
                         round = true, onHint = { hint = it },
                         icon = { if (playing) PauseIcon(it) else PlayIcon(it) },
                     )
                     ChromeButton(
-                        if (following) "Deixar de seguir" else "Seguir", following, onFollow, onInteract,
+                        if (following) "Deixar de seguir" else "Seguir", following, onFollow, onInteract, followReq,
                         round = true, onHint = { hint = it }, icon = { HeartIcon(filled = following, color = it) },
                     )
                     if (!isVod) ChromeButton(
@@ -930,7 +1085,7 @@ class PulsoPlayerActivity : ComponentActivity() {
                         round = true, onHint = { hint = it }, icon = { ChannelIcon(it) },
                     )
                     ChromeButton(
-                        "Opções", false, onOptions, onInteract, optionsButton,
+                        "Opções", false, onOptions, onInteract, optionsReq,
                         round = true, onHint = { hint = it }, icon = { MoreIcon(it) },
                     )
                     Box(Modifier.weight(1f))
@@ -1042,10 +1197,11 @@ class PulsoPlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun sendChat(text: String) {
+    /** Returns false when nothing was sent (empty text, engine not connected). */
+    private fun sendChat(text: String): Boolean {
         val msg = text.trim()
-        val svc = service ?: return
-        if (msg.isEmpty()) return
+        val svc = service ?: return false
+        if (msg.isEmpty()) return false
         chatViewModel.send(
             message = msg,
             replyId = null,
@@ -1059,6 +1215,7 @@ class PulsoPlayerActivity : ComponentActivity() {
             useApiChatMessages = prefs().getBoolean(C.DEBUG_API_CHAT_MESSAGES, true),
             enableIntegrity = prefs().getBoolean(C.ENABLE_INTEGRITY, false),
         )
+        return true
     }
 
     /** Message box over the player: the system keyboard opens, OK/Enter sends, Voltar cancels. */
@@ -1073,7 +1230,7 @@ class PulsoPlayerActivity : ComponentActivity() {
             keyboard?.show()
         }
         Box(
-            Modifier.fillMaxSize().background(Color(0x99000000))
+            Modifier.fillMaxSize().background(Color(0x99000000)).focusGroup()
                 .pointerInput(Unit) { detectTapGestures { menu = null } },
             contentAlignment = Alignment.TopCenter,
         ) {
@@ -1112,7 +1269,7 @@ class PulsoPlayerActivity : ComponentActivity() {
         val first = remember { FocusRequester() }
         LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
         Box(
-            Modifier.fillMaxSize().background(Color(0x99000000))
+            Modifier.fillMaxSize().background(Color(0x99000000)).focusGroup()
                 .pointerInput(Unit) { detectTapGestures { onCancel() } }
                 .onKeyEvent { e ->
                     if (e.type == KeyEventType.KeyUp && e.key == Key.Back) { onCancel(); true } else false
@@ -1139,21 +1296,15 @@ class PulsoPlayerActivity : ComponentActivity() {
 
     private fun qualityLabel(q: VideoQuality): String = when (q.name) {
         VideoQuality.AUTO_QUALITY -> "Automático"
-        VideoQuality.SOURCE_QUALITY -> "Fonte" + (q.resolution?.let { " ($it)" } ?: "")
+        // "Fonte" is translated on its own; the resolution after it is not text to translate
+        VideoQuality.SOURCE_QUALITY -> tr("Fonte") + (q.resolution?.let { " ($it)" } ?: "")
         else -> q.name.orEmpty()
     }
 
-    private fun formatViewers(n: Int): String = when {
-        n >= 1_000_000 -> String.format("%.1f mi", n / 1_000_000f)
-        n >= 1_000 -> String.format("%.1f mil", n / 1_000f)
-        else -> n.toString()
-    }
+    private fun formatViewers(n: Int): String = PulsoLang.compact(n)
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            keepChromeHidden = false
-            interaction++
-        }
+        if (event.action == KeyEvent.ACTION_DOWN) interaction++
         // Escape / Backspace also leave the player (remotes and keyboards)
         if (event.action == KeyEvent.ACTION_UP &&
             (event.keyCode == KeyEvent.KEYCODE_ESCAPE || (event.keyCode == KeyEvent.KEYCODE_DEL && menu != "compose"))

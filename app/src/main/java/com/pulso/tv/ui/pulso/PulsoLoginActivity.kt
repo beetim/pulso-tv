@@ -1,7 +1,7 @@
 package com.pulso.tv.ui.pulso
 
 import android.os.Bundle
-import android.view.WindowManager
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -49,6 +49,7 @@ import com.pulso.tv.util.C
 import com.pulso.tv.util.TwitchApiHelper
 import com.pulso.tv.util.prefs
 import com.pulso.tv.util.tokenPrefs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /**
@@ -60,7 +61,6 @@ class PulsoLoginActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             CompositionLocalProvider(LocalTextStyle provides TextStyle(fontFamily = PulsoFont)) {
                 var userCode by remember { mutableStateOf<String?>(null) }
@@ -82,36 +82,45 @@ class PulsoLoginActivity : ComponentActivity() {
                             "client_id=$clientId&scopes=channel_read+chat%3Aread+user_blocks_edit+user_blocks_read+user_follows_edit+user_read"
                         )
                     }
-                    device.getOrNull()?.let { code ->
-                        userCode = code.userCode
-                        status = "Aguardando você confirmar no celular…"
-                        repeat(90) {
-                            delay(5000)
-                            val token = runCatching {
-                                auth.getToken(
-                                    network,
-                                    "client_id=$clientId&device_code=${code.deviceCode}" +
-                                        "&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code"
-                                )
-                            }.getOrNull()?.token
-                            if (!token.isNullOrBlank()) {
-                                val valid = runCatching {
-                                    auth.validate(network, TwitchApiHelper.addTokenPrefixGQL(token))
-                                }.getOrNull()
-                                if (valid != null && valid.clientId == clientId) {
-                                    saveSession(clientId, token, valid.userId, valid.login)
-                                    setResult(RESULT_OK)
-                                    finish()
-                                    return@LaunchedEffect
-                                }
-                            }
-                        }
-                        status = "O código expirou. Gere outro."
-                        failed = true
-                    } ?: run {
+                    // runCatching also swallows the cancellation of a new attempt
+                    device.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+                    val code = device.getOrNull()
+                    val deviceCode = code?.deviceCode
+                    val shownCode = code?.userCode
+                    if (code == null || deviceCode.isNullOrBlank() || shownCode.isNullOrBlank()) {
+                        // an answer without codes is a failure too: no empty "Aguardando…" screen
                         status = device.exceptionOrNull()?.message ?: "Não consegui falar com a Twitch"
                         failed = true
+                        return@LaunchedEffect
                     }
+                    userCode = shownCode
+                    status = "Aguardando você confirmar no celular…"
+                    // the answer says how long the code lives and how often to ask
+                    val intervalMs = (code.interval ?: 5).coerceIn(2, 30) * 1000L
+                    val deadline = SystemClock.elapsedRealtime() + (code.expiresIn ?: 450).coerceIn(60, 1800) * 1000L
+                    while (SystemClock.elapsedRealtime() < deadline) {
+                        delay(intervalMs)
+                        val token = runCatching {
+                            auth.getToken(
+                                network,
+                                "client_id=$clientId&device_code=$deviceCode" +
+                                    "&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code"
+                            )
+                        }.getOrNull()?.token
+                        if (!token.isNullOrBlank()) {
+                            val valid = runCatching {
+                                auth.validate(network, TwitchApiHelper.addTokenPrefixGQL(token))
+                            }.getOrNull()
+                            if (valid != null && valid.clientId == clientId) {
+                                saveSession(clientId, token, valid.userId, valid.login)
+                                setResult(RESULT_OK)
+                                finish()
+                                return@LaunchedEffect
+                            }
+                        }
+                    }
+                    status = "O código expirou. Gere outro."
+                    failed = true
                 }
 
                 LoginScreen(
