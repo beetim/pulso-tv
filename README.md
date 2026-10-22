@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>A Twitch feita para a sua TV.</b><br>
-  Cliente de código aberto para Android TV e Google TV, pensado para o controle remoto.
+  Cliente de código aberto para Android TV e Google TV.
 </p>
 
 <p align="center">
@@ -22,13 +22,10 @@
 ## Por que o pulso.tv
 
 O app oficial da Twitch na TV é pesado e pouco pensado para quem assiste do sofá. O pulso.tv é um
-cliente leve, com a interface inteira desenhada para o D-pad: tudo se alcança com as setas e o OK,
-sem precisar de mouse, toque ou teclado.
+cliente leve.
 
 - **Sem anúncios do app e sem rastreamento.** Nenhuma telemetria, nenhuma conta própria, nenhuma
   propaganda. O app só conversa com a Twitch e com os serviços de emotes.
-- **Feito para o controle remoto.** O foco nunca se perde: cada tela tem um ponto de partida claro
-  e o botão Voltar faz o que você espera.
 - **Gratuito e de código aberto** (AGPL-3.0). Você pode ler, auditar e compilar o app você mesmo.
 
 ## Recursos
@@ -49,7 +46,6 @@ sem precisar de mouse, toque ou teclado.
 ## Requisitos
 
 - Android TV ou Google TV com **Android 7.0** ou superior.
-- Controle remoto com D-pad. Touchscreen não é necessário.
 
 ## Instalação
 
