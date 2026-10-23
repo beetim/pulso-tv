@@ -55,6 +55,23 @@ class PulsoApp : Application(), SingletonImageLoader.Factory {
             val conscrypt = Conscrypt.newProvider()
             Security.insertProviderAt(conscrypt, 1)
         }
+        warmUpNetwork()
+    }
+
+    /**
+     * Opens the DNS/TLS connections to Twitch while the Home is still drawing, so the first
+     * stream does not pay for them (cold start was ~2 s of network before the first frame).
+     * The connections stay in the shared OkHttp pool.
+     */
+    private fun warmUpNetwork() {
+        Thread {
+            val client = pulsoModule.okHttpClient.value
+            listOf("https://gql.twitch.tv/", "https://usher.ttvnw.net/", "https://api.twitch.tv/").forEach { url ->
+                runCatching {
+                    client.newCall(okhttp3.Request.Builder().url(url).head().build()).execute().close()
+                }
+            }
+        }.apply { priority = Thread.MIN_PRIORITY }.start()
     }
 
     @OptIn(ExperimentalCoilApi::class)

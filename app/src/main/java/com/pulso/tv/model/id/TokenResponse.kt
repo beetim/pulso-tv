@@ -7,5 +7,7 @@ import kotlinx.serialization.Serializable
 class TokenResponse(
     @SerialName("access_token")
     val token: String? = null,
+    @SerialName("refresh_token")
+    val refreshToken: String? = null,
     val message: String? = null,
 )

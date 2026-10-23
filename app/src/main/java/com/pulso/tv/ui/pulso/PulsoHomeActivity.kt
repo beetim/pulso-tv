@@ -17,6 +17,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextStyle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.paging.PagingSource
 import com.pulso.tv.PulsoApp
 import com.pulso.tv.graphql.type.StreamSort
@@ -51,6 +53,16 @@ class PulsoHomeActivity : ComponentActivity() {
         PulsoUpdater.homeVisible = true
         resumeTick++
         PulsoUpdater.checkIfDue(applicationContext)
+        checkSession()
+    }
+
+    /** Renews an expired Twitch token in the background; if that is impossible, asks for a new sign-in. */
+    private fun checkSession() {
+        if (!isLoggedIn()) return
+        lifecycleScope.launch {
+            val alive = withContext(Dispatchers.IO) { PulsoSession.ensureValid(application as PulsoApp) }
+            if (!alive) signOut(expired = true)
+        }
     }
 
     override fun onPause() {
@@ -147,7 +159,8 @@ class PulsoHomeActivity : ComponentActivity() {
     }
 
     /** Same fields the stock login clears before a new sign-in. */
-    private fun signOut() {
+    private fun signOut(expired: Boolean = false) {
+        PulsoSession.clear(this)
         tokenPrefs().edit()
             .putString(C.TOKEN, null)
             .putString(C.GQL_HEADERS, null)
@@ -160,7 +173,11 @@ class PulsoHomeActivity : ComponentActivity() {
             .putLong(C.INTEGRITY_EXPIRATION, 0)
             .apply()
         TwitchApiHelper.checkedValidation = false
-        Toast.makeText(this, tr("Você saiu da conta"), Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            this,
+            tr(if (expired) "Sua sessão expirou. Entre de novo." else "Você saiu da conta"),
+            Toast.LENGTH_LONG
+        ).show()
         reload++
     }
 

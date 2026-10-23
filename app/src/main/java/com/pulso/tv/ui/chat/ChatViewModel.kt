@@ -1940,7 +1940,7 @@ class ChatViewModel(
                         sendMessage(message, networkLibrary, gqlHeaders, helixHeaders, accountId, channelId, useApiChatMessages, enableIntegrity, replyId)
                     }
                 } catch (e: Exception) {
-
+                    onMessage(ChatMessage(systemMsg = "Não foi possível enviar a mensagem"))
                 }
             }
         } else {
@@ -1951,7 +1951,7 @@ class ChatViewModel(
                     try {
                         sendMessage(message, networkLibrary, gqlHeaders, helixHeaders, accountId, channelId, useApiChatMessages, enableIntegrity, replyId)
                     } catch (e: Exception) {
-
+                        onMessage(ChatMessage(systemMsg = "Não foi possível enviar a mensagem"))
                     }
                 }
             }

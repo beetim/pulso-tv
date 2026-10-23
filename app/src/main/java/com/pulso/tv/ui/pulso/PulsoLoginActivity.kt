@@ -100,19 +100,21 @@ class PulsoLoginActivity : ComponentActivity() {
                     val deadline = SystemClock.elapsedRealtime() + (code.expiresIn ?: 450).coerceIn(60, 1800) * 1000L
                     while (SystemClock.elapsedRealtime() < deadline) {
                         delay(intervalMs)
-                        val token = runCatching {
+                        val tokenResponse = runCatching {
                             auth.getToken(
                                 network,
                                 "client_id=$clientId&device_code=$deviceCode" +
                                     "&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code"
                             )
-                        }.getOrNull()?.token
+                        }.getOrNull()
+                        val token = tokenResponse?.token
                         if (!token.isNullOrBlank()) {
                             val valid = runCatching {
                                 auth.validate(network, TwitchApiHelper.addTokenPrefixGQL(token))
                             }.getOrNull()
                             if (valid != null && valid.clientId == clientId) {
                                 saveSession(clientId, token, valid.userId, valid.login)
+                                PulsoSession.saveRefreshToken(applicationContext, tokenResponse.refreshToken)
                                 setResult(RESULT_OK)
                                 finish()
                                 return@LaunchedEffect
