@@ -177,7 +177,13 @@ fun PulsoHome(
             .fillMaxSize()
             .background(Pulso.Background)
     ) {
-        Column(Modifier.fillMaxSize()) {
+        // while an overlay (profile, language, update, exit) is open the Home behind it takes no focus,
+        // so a key press after coming back from another screen can never land on a hidden button
+        Column(
+            Modifier
+                .fillMaxSize()
+                .focusProperties { canFocus = !(profileOpen || langOpen || exitOpen || updateOpen) }
+        ) {
             Header(
                 loggedIn = loggedIn, userName = userName, onSearch = onSearch,
                 // logged out too: the panel is the only way to Configurações and the update check
