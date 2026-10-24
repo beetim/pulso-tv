@@ -1,0 +1,11 @@
+# Hand-written baseline profile: the start-up path (Home) and the player screen are compiled ahead of time.
+HSPLcom/pulso/tv/PulsoApp;->**(**)**
+HSPLcom/pulso/tv/PulsoModule;->**(**)**
+HSPLcom/pulso/tv/ui/pulso/**->**(**)**
+HSPLcom/pulso/tv/repository/GraphQLRepository;->**(**)**
+HSPLcom/pulso/tv/repository/PlayerRepository;->**(**)**
+Lcom/pulso/tv/PulsoApp;
+Lcom/pulso/tv/PulsoModule;
+Lcom/pulso/tv/ui/pulso/**;
+Lcom/pulso/tv/ui/player/ExoPlayerService;
+Lcom/pulso/tv/ui/chat/ChatViewModel;

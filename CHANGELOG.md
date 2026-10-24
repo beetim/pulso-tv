@@ -5,6 +5,9 @@
 - Ad protection: playback token requested anonymously first, plus the engine's video swap and "hide ads" as a safety net. It can be turned off in Settings.
 - The chat now disconnects when hidden (or in full screen / in the background) and reconnects when shown again, keeping the messages already received.
 - New setting: open the player with or without the chat.
+- Much lighter: the APK went from 11.9 MB to 6.5 MB (old Xtra screens, unused libraries and the bundled TLS library removed). Android 9 or newer is now required.
+- The card preview switches player type when an ad shows up, instead of waiting for the ad to end.
+- Lighter chat: 7TV event socket, paints and raid/poll/prediction messages are off.
 
 ## 1.0.5
 - Smaller APK (translation libraries and x86 removed), focus fixes, release and update flow.

@@ -9,12 +9,10 @@
         android:required="false" />
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
@@ -32,12 +30,6 @@
         android:theme="@style/DarkTheme"
         tools:ignore="UnusedAttribute">
         <activity
-            android:name=".ui.main.MainActivity"
-            android:launchMode="singleTask"
-            android:supportsPictureInPicture="true"
-            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation"
-            android:exported="false" />
-        <activity
             android:name=".ui.pulso.PulsoHomeActivity"
             android:label="@string/app_name"
             android:exported="true"
@@ -48,7 +40,6 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".ui.settings.SettingsActivity" />
         <activity
             android:name=".ui.pulso.PulsoSearchActivity"
             android:windowSoftInputMode="adjustResize"
@@ -71,10 +62,6 @@
         <activity
             android:name=".ui.pulso.PulsoLoginActivity"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation" />
-        <activity
-            android:name=".ui.login.LoginActivity"
-            android:configChanges="orientation|screenSize"
-            android:windowSoftInputMode="adjustResize" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -86,55 +73,23 @@
                 android:resource="@xml/pulso_update_paths" />
         </provider>
 
+        <!-- Nothing here needs WorkManager: skip its start-up (database, receivers, services) -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                tools:node="remove" />
+            <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                tools:node="remove" />
+        </provider>
+
         <service
             android:name=".ui.player.ExoPlayerService"
             android:foregroundServiceType="mediaPlayback" />
 
-        <service
-            android:name=".ui.player.MediaPlayerService"
-            android:foregroundServiceType="mediaPlayback" />
-
-        <service
-            android:name=".ui.download.VideoDownloadService"
-            android:foregroundServiceType="specialUse" />
-
-        <service
-            android:name=".ui.download.StreamDownloadService"
-            android:foregroundServiceType="specialUse" />
-
-        <service
-            android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
-            android:enabled="false"
-            android:exported="false">
-            <meta-data
-                android:name="autoStoreLocales"
-                android:value="true" />
-        </service>
-
-        <!-- ML Kit translation library -->
-        <service
-            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService"
-            tools:node="remove" />
-
-        <receiver
-            android:name=".util.MediaButtonReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MEDIA_BUTTON" />
-            </intent-filter>
-        </receiver>
-
-        <receiver
-            android:name="android.app.admin.DeviceAdminReceiver"
-            android:label="@string/app_name"
-            android:permission="android.permission.BIND_DEVICE_ADMIN"
-            android:exported="false">
-            <meta-data
-                android:name="android.app.device_admin"
-                android:resource="@xml/device_admin" />
-            <intent-filter>
-                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
-            </intent-filter>
-        </receiver>
     </application>
 </manifest>

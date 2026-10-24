@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="pulsoBackground">#0E0E10</color>
     <color name="darkScrim">#801B1B1B</color>
     <color name="lightScrim">#E6FFFFFF</color>
     <color name="accent">#007DCA</color>

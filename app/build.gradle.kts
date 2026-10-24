@@ -6,7 +6,6 @@ plugins {
     alias(libs.plugins.kotlin.parcelize)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.navigation.safeargs)
     alias(libs.plugins.apollo)
 }
 
@@ -71,7 +70,6 @@ android {
     }
     buildFeatures {
         buildConfig = true
-        viewBinding = true
         compose = true
     }
     androidResources {
@@ -91,33 +89,17 @@ dependencies {
     implementation(libs.paging.compose)
     implementation(libs.coil.compose)
     implementation(libs.zxing.core)
-    implementation(libs.tv.material)
     compileOnly("com.google.j2objc:j2objc-annotations:3.0.0") // OkHttpDataSource SettableFuture
 
-    implementation(libs.material)
-    implementation(libs.markwon.core)
-    implementation(libs.markwon.linkify)
-
     implementation(libs.activity)
-    implementation(libs.appcompat)
-    implementation(libs.constraintlayout)
-    implementation(libs.coordinatorlayout)
     implementation(libs.core)
-    implementation(libs.fragment)
     implementation(libs.lifecycle.service)
     implementation(libs.lifecycle.viewmodel)
-    implementation(libs.navigation.fragment)
-    implementation(libs.navigation.ui)
     implementation(libs.paging.runtime)
     implementation(libs.preference.ktx)
-    implementation(libs.recyclerview)
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
     implementation(libs.room.paging)
-    implementation(libs.swiperefreshlayout)
-    implementation(libs.viewpager2)
-    implementation(libs.webkit)
-    implementation(libs.work.runtime)
 
     implementation(libs.cronet.api)
     implementation(libs.okhttp)
@@ -133,11 +115,6 @@ dependencies {
     implementation(libs.coil)
     implementation(libs.coil.gif)
     implementation(libs.coil.okhttp)
-
-    implementation(libs.glide)
-    ksp(libs.glide.ksp)
-    implementation(libs.glide.okhttp)
-    implementation(libs.glide.webpdecoder)
 
     implementation(libs.coroutines)
 }

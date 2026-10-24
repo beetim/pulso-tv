@@ -50,7 +50,27 @@ class PulsoApp : Application(), SingletonImageLoader.Factory {
         }
         pulsoModule = PulsoModule(this)
         seedAdBlocking(preferences)
+        seedLightChat(preferences)
         warmUpNetwork()
+    }
+
+    /**
+     * Chat features the Pulso screen never shows stay off, once per install: the 7TV event socket (live emote
+     * updates, name paints, 7TV badges, personal emotes) and the raid/poll/prediction messages. The PubSub
+     * socket stays on, because it also collects channel points.
+     */
+    private fun seedLightChat(preferences: android.content.SharedPreferences) {
+        if (preferences.getBoolean("pulso_lightchat_v1", false)) return
+        preferences.edit()
+            .putBoolean(C.CHAT_STV_LIVE_UPDATES, false)
+            .putBoolean(C.CHAT_SHOW_PAINTS, false)
+            .putBoolean(C.CHAT_SHOW_STV_BADGES, false)
+            .putBoolean(C.CHAT_SHOW_PERSONAL_EMOTES, false)
+            .putBoolean(C.CHAT_RAIDS_SHOW, false)
+            .putBoolean(C.CHAT_POLLS_SHOW, false)
+            .putBoolean(C.CHAT_PREDICTIONS_SHOW, false)
+            .putBoolean("pulso_lightchat_v1", true)
+            .apply()
     }
 
     /**
