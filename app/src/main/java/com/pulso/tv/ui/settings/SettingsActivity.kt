@@ -71,10 +71,6 @@ import com.pulso.tv.util.getAlertDialogBuilder
 import com.pulso.tv.util.prefs
 import com.pulso.tv.util.tokenPrefs
 import com.google.android.material.appbar.AppBarLayout
-import com.google.mlkit.common.model.DownloadConditions
-import com.google.mlkit.common.model.RemoteModelManager
-import com.google.mlkit.nl.translate.TranslateLanguage
-import com.google.mlkit.nl.translate.TranslateRemoteModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -938,53 +934,10 @@ class SettingsActivity : AppCompatActivity() {
                     true
                 }
             }
-            if (Build.SUPPORTED_64_BIT_ABIS.firstOrNull() == "arm64-v8a") {
-                val languages = TranslateLanguage.getAllLanguages()
-                val names = languages.map { Locale.forLanguageTag(it).displayLanguage }.toTypedArray()
-                findPreference<Preference>("downloaded_languages")?.setOnPreferenceClickListener {
-                    val modelManager = RemoteModelManager.getInstance()
-                    modelManager.getDownloadedModels(TranslateRemoteModel::class.java)
-                        .addOnSuccessListener { models ->
-                            val downloaded = models.map { it.language }
-                            val checked = languages.map { downloaded.contains(it) }.toBooleanArray()
-                            val selectedItems = downloaded.toMutableList()
-                            requireActivity().getAlertDialogBuilder()
-                                .setMultiChoiceItems(names, checked) { _, which, isChecked ->
-                                    languages.getOrNull(which)?.let { language ->
-                                        if (isChecked) {
-                                            if (!selectedItems.contains(language)) {
-                                                selectedItems.add(language)
-                                            }
-                                        } else {
-                                            selectedItems.remove(language)
-                                        }
-                                    }
-                                }
-                                .setPositiveButton(android.R.string.ok) { _, _ ->
-                                    downloaded.filter { !selectedItems.contains(it) }.forEach {
-                                        modelManager.deleteDownloadedModel(TranslateRemoteModel.Builder(it).build())
-                                    }
-                                    selectedItems.filter { !downloaded.contains(it) }.forEach {
-                                        modelManager.download(
-                                            TranslateRemoteModel.Builder(it).build(),
-                                            DownloadConditions.Builder().build()
-                                        )
-                                    }
-                                }
-                                .setNegativeButton(getString(android.R.string.cancel), null)
-                                .show()
-                        }
-                    true
-                }
-                findPreference<ListPreference>("chat_translate_target")?.apply {
-                    entries = names
-                    entryValues = languages.toTypedArray()
-                }
-            } else {
-                findPreference<SwitchPreferenceCompat>("chat_translate")?.isVisible = false
-                findPreference<Preference>("downloaded_languages")?.isVisible = false
-                findPreference<ListPreference>("chat_translate_target")?.isVisible = false
-            }
+            // on-device translation (ML Kit) was removed from the app to keep it small
+            findPreference<SwitchPreferenceCompat>("chat_translate")?.isVisible = false
+            findPreference<Preference>("downloaded_languages")?.isVisible = false
+            findPreference<ListPreference>("chat_translate_target")?.isVisible = false
         }
 
         override fun onViewCreated(view: View, savedInstanceState: Bundle?) {

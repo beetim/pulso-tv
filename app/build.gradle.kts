@@ -60,6 +60,8 @@ android {
             isShrinkResources = true
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // TVs are ARM: the x86 libraries (Conscrypt, Glide WebP) were ~7 MB of dead weight
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
             signingConfig = if (pulsoKeystore.exists()) {
                 signingConfigs.getByName("pulso")
             } else {
@@ -78,14 +80,6 @@ android {
     lint {
         disable += "ContentDescription"
     }
-    packaging.jniLibs.excludes.addAll(listOf(
-        "lib/x86/libtranslate_jni.so",
-        "lib/x86/liblanguage_id_l2c_jni.so",
-        "lib/x86_64/libtranslate_jni.so",
-        "lib/x86_64/liblanguage_id_l2c_jni.so",
-        "lib/armeabi-v7a/libtranslate_jni.so",
-        "lib/armeabi-v7a/liblanguage_id_l2c_jni.so",
-    ))
 }
 
 dependencies {
@@ -99,8 +93,6 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.tv.material)
     compileOnly("com.google.j2objc:j2objc-annotations:3.0.0") // OkHttpDataSource SettableFuture
-    implementation("com.google.mlkit:language-id:17.0.6")
-    implementation("com.google.mlkit:translate:17.0.3")
 
     implementation(libs.material)
     implementation(libs.markwon.core)

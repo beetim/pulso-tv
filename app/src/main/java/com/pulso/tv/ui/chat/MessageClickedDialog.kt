@@ -39,7 +39,6 @@ import com.pulso.tv.util.getAlertDialogBuilder
 import com.pulso.tv.util.prefs
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import com.google.mlkit.nl.translate.TranslateLanguage
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -267,7 +266,7 @@ class MessageClickedDialog : BottomSheetDialogFragment(), IntegrityDialog.Listen
                 }
                 translateMessageSelectLanguage.visibility = View.VISIBLE
                 translateMessageSelectLanguage.setOnClickListener {
-                    val languages = TranslateLanguage.getAllLanguages()
+                    val languages = java.util.Locale.getISOLanguages().toList()
                     val names = languages.map { Locale.forLanguageTag(it).displayName }.toTypedArray()
                     requireContext().getAlertDialogBuilder()
                         .setSingleChoiceItems(names, languages.indexOf(selectedLanguage)) { _, which ->
