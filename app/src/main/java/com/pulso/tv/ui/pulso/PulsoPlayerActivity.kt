@@ -653,7 +653,8 @@ class PulsoPlayerActivity : ComponentActivity() {
         Row(
             Modifier
                 .fillMaxSize()
-                .focusProperties { canFocus = !blocked }
+                // only ever set false: a parent's canFocus = true would override children's own canFocus = false
+                .then(if (blocked) Modifier.focusProperties { canFocus = false } else Modifier)
                 .pointerInput(Unit) {
                     detectTapGestures { interaction++ }
                 }

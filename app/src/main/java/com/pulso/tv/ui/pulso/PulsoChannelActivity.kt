@@ -451,7 +451,9 @@ class PulsoChannelActivity : ComponentActivity() {
                 verticalArrangement = Arrangement.spacedBy(24.dp),
                 contentPadding = PaddingValues(start = Pulso.Dp.safeH, end = Pulso.Dp.safeH, top = Pulso.Dp.safeV, bottom = 90.dp),
                 // while the login dialog is open nothing behind it can take the focus
-                modifier = Modifier.fillMaxSize().focusProperties { canFocus = canFocusBehind },
+                // (only ever set false: canFocus = true on a parent would override children's own canFocus = false)
+                modifier = Modifier.fillMaxSize()
+                    .then(if (!canFocusBehind) Modifier.focusProperties { canFocus = false } else Modifier),
             ) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Column {

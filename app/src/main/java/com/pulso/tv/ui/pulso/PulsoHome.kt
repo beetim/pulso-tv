@@ -178,11 +178,14 @@ fun PulsoHome(
             .background(Pulso.Background)
     ) {
         // while an overlay (profile, language, update, exit) is open the Home behind it takes no focus,
-        // so a key press after coming back from another screen can never land on a hidden button
+        // so a key press after coming back from another screen can never land on a hidden button.
+        // Only ever set canFocus = false: a parent's canFocus = true would override the
+        // focusGroup() below (canFocus = false) and turn the whole shelves column into a focus target.
+        val overlayOpen = profileOpen || langOpen || exitOpen || updateOpen
         Column(
             Modifier
                 .fillMaxSize()
-                .focusProperties { canFocus = !(profileOpen || langOpen || exitOpen || updateOpen) }
+                .then(if (overlayOpen) Modifier.focusProperties { canFocus = false } else Modifier)
         ) {
             Header(
                 loggedIn = loggedIn, userName = userName, onSearch = onSearch,
