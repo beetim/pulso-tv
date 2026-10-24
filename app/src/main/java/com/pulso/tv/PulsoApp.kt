@@ -24,8 +24,6 @@ import okio.Buffer
 import okio.buffer
 import okio.source
 import org.chromium.net.apihelpers.UploadDataProviders
-import org.conscrypt.Conscrypt
-import java.security.Security
 
 class PulsoApp : Application(), SingletonImageLoader.Factory {
 
@@ -52,10 +50,6 @@ class PulsoApp : Application(), SingletonImageLoader.Factory {
         }
         pulsoModule = PulsoModule(this)
         seedAdBlocking(preferences)
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            val conscrypt = Conscrypt.newProvider()
-            Security.insertProviderAt(conscrypt, 1)
-        }
         warmUpNetwork()
     }
 

@@ -72,9 +72,8 @@ import com.pulso.tv.player.lowlatency.CronetDataSource
 import com.pulso.tv.player.lowlatency.HlsPlaylistParser
 import com.pulso.tv.player.lowlatency.HttpEngineDataSource
 import com.pulso.tv.player.lowlatency.OkHttpDataSource
-import com.pulso.tv.ui.main.MainActivity
+import com.pulso.tv.ui.pulso.PulsoPlayerActivity
 import com.pulso.tv.util.C
-import com.pulso.tv.util.MediaButtonReceiver
 import com.pulso.tv.util.NetworkUtils
 import com.pulso.tv.util.NetworkUtils.executeAsync
 import com.pulso.tv.util.TwitchApiHelper
@@ -705,18 +704,6 @@ class ExoPlayerService : BasePlaybackService() {
             val session = MediaSession(this, "ExoPlayerService")
             this.session = session
             session.setCallback(sessionCallback)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                try {
-                    session.setMediaButtonBroadcastReceiver(ComponentName(this, MediaButtonReceiver::class.java))
-                } catch (e: IllegalArgumentException) {
-                    // https://github.com/androidx/media/issues/1730
-                }
-            } else {
-                @Suppress("DEPRECATION")
-                session.setMediaButtonReceiver(
-                    PendingIntent.getBroadcast(this, 0, Intent(Intent.ACTION_MEDIA_BUTTON).setClass(this, MediaButtonReceiver::class.java), PendingIntent.FLAG_MUTABLE)
-                )
-            }
             session.isActive = true
             notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             val channelId = getString(R.string.notification_playback_channel_id)
@@ -2537,9 +2524,9 @@ class ExoPlayerService : BasePlaybackService() {
                     PendingIntent.getActivity(
                         this@ExoPlayerService,
                         REQUEST_CODE_RESUME,
-                        Intent(this@ExoPlayerService, MainActivity::class.java).apply {
-                            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP
-                            action = MainActivity.INTENT_OPEN_PLAYER
+                        // brings the player screen that is already open back to the front
+                        Intent(this@ExoPlayerService, PulsoPlayerActivity::class.java).apply {
+                            flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                         },
                         PendingIntent.FLAG_IMMUTABLE
                     )

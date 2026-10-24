@@ -42,7 +42,7 @@ android {
 
     defaultConfig {
         applicationId = "com.pulso.tv"
-        minSdk = 24
+        minSdk = 28 // Android 9+: the system TLS is enough, no bundled Conscrypt
         targetSdk = 37
         versionCode = 128
         versionName = "1.0.6"
@@ -60,7 +60,7 @@ android {
             isShrinkResources = true
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // TVs are ARM: the x86 libraries (Conscrypt, Glide WebP) were ~7 MB of dead weight
+            // TVs are ARM: the x86 libraries (native libraries) were ~7 MB of dead weight
             ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
             signingConfig = if (pulsoKeystore.exists()) {
                 signingConfigs.getByName("pulso")
@@ -122,7 +122,6 @@ dependencies {
     implementation(libs.cronet.api)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
-    implementation(libs.conscrypt)
     implementation(libs.serialization.json)
     implementation(libs.apollo.api)
 
