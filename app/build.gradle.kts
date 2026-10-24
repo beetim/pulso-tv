@@ -44,8 +44,8 @@ android {
         applicationId = "com.pulso.tv"
         minSdk = 24
         targetSdk = 37
-        versionCode = 126
-        versionName = "1.0.4"
+        versionCode = 127
+        versionName = "1.0.5"
         // "dono/repositorio" dos Releases consultados pelo atualizador; vazio desliga a checagem
         buildConfigField("String", "GITHUB_REPO", "\"${(findProperty("pulso.githubRepo") as String?).orEmpty()}\"")
     }
