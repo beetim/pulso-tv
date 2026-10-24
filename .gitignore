@@ -64,3 +64,9 @@ fastlane/test_output
 fastlane/readme.md
 
 /.kotlin/
+
+# notas privadas do projeto (ficam só no PC)
+CLAUDE.md
+HANDOFF.md
+docs/CLAUDE.md
+docs/HANDOFF.md

@@ -139,7 +139,6 @@ e preencha o `keystore.properties` conforme o `app/build.gradle.kts`. Sem ele, o
 de depuração. Para o atualizador apontar para o seu fork, mude `pulso.githubRepo` no
 `gradle.properties`.
 
-Notas de desenvolvimento: [`docs/CLAUDE.md`](docs/CLAUDE.md) e [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 ## Aviso legal
 

@@ -1,6 +1,6 @@
 # Installs pulso.tv on the TV via adb, downloading the APK from the latest GitHub Release.
 # Usage:  irm https://raw.githubusercontent.com/beetim/pulso-tv/main/install.ps1 | iex
-#   or: .\install.ps1 -Ip 192.168.0.11
+#   or: .\install.ps1 -Ip 192.168.x.x
 param([string]$Ip)
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +13,7 @@ if (-not $adb) {
     return
 }
 
-if (-not $Ip) { $Ip = Read-Host 'TV IP address (e.g. 192.168.0.11)' }
+if (-not $Ip) { $Ip = Read-Host 'TV IP address (e.g. 192.168.x.x)' }
 $Ip = $Ip.Trim()
 if (-not $Ip) { Write-Host 'Enter the TV IP address (Settings > Network).'; return }
 $target = if ($Ip -match ':') { $Ip } else { "${Ip}:5555" }

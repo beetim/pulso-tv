@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs pulso.tv on the TV via adb, downloading the APK from the latest GitHub Release.
-# Usage:  curl -fsSL https://raw.githubusercontent.com/beetim/pulso-tv/main/install.sh | bash -s -- 192.168.0.11
-#   or: ./install.sh 192.168.0.11
+# Usage:  curl -fsSL https://raw.githubusercontent.com/beetim/pulso-tv/main/install.sh | bash -s -- 192.168.x.x
+#   or: ./install.sh 192.168.x.x
 set -euo pipefail
 
 REPO="beetim/pulso-tv"
@@ -14,7 +14,7 @@ if ! command -v adb >/dev/null 2>&1; then
 fi
 
 if [ -z "$IP" ]; then
-  read -rp "TV IP address (e.g. 192.168.0.11): " IP </dev/tty
+  read -rp "TV IP address (e.g. 192.168.x.x): " IP </dev/tty
 fi
 case "$IP" in *:*) TARGET="$IP" ;; *) TARGET="$IP:5555" ;; esac
 

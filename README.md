@@ -136,7 +136,6 @@ keytool -genkey -v -keystore pulso.jks -alias pulso -keyalg RSA -keysize 2048 -v
 and fill in `keystore.properties` as described in `app/build.gradle.kts`. Without it, the build uses
 the debug key. To point the updater at your own fork, change `pulso.githubRepo` in `gradle.properties`.
 
-Development notes: [`docs/CLAUDE.md`](docs/CLAUDE.md) and [`docs/HANDOFF.md`](docs/HANDOFF.md) (in Portuguese).
 
 ## Disclaimer
 
