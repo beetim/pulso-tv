@@ -7,7 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -63,6 +66,9 @@ class PulsoSettingsActivity : ComponentActivity() {
         }
         var chatText by remember { mutableStateOf(prefs.getInt(PREF_CHAT_TEXT, 14)) }
         var emotes by remember { mutableStateOf(prefs.getBoolean(C.CHAT_ENABLE_STV, true)) }
+        var chatOnOpen by remember { mutableStateOf(prefs.getBoolean(PREF_CHAT_ON_OPEN, true)) }
+        var preview by remember { mutableStateOf(prefs.getBoolean(PREF_PREVIEW, true)) }
+        var adblock by remember { mutableStateOf(prefs.getBoolean(PREF_ADBLOCK, true)) }
 
         val qualityLabel = qualities.firstOrNull { it.value == quality }?.label ?: quality
         val sizes = listOf(12 to "Pequeno", 14 to "Médio", 18 to "Grande")
@@ -72,7 +78,9 @@ class PulsoSettingsActivity : ComponentActivity() {
                 Modifier
                     .align(Alignment.TopStart)
                     .padding(start = Pulso.Dp.safeH, top = Pulso.Dp.safeV)
-                    .width(520.dp),
+                    .width(520.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("Configurações", color = Pulso.TextPrimary, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
@@ -106,6 +114,31 @@ class PulsoSettingsActivity : ComponentActivity() {
                         .putBoolean(C.CHAT_ENABLE_FFZ, emotes)
                         .apply()
                 }
+                PulsoPill(
+                    "Abrir o player com o chat: " + if (chatOnOpen) "Sim" else "Não",
+                    height = 44.dp, modifier = Modifier.fillMaxWidth(),
+                ) {
+                    chatOnOpen = !chatOnOpen
+                    prefs.edit().putBoolean(PREF_CHAT_ON_OPEN, chatOnOpen).apply()
+                }
+                PulsoPill(
+                    "Prévia ao focar nos cards: " + if (preview) "Ligada" else "Desligada",
+                    height = 44.dp, modifier = Modifier.fillMaxWidth(),
+                ) {
+                    preview = !preview
+                    prefs.edit().putBoolean(PREF_PREVIEW, preview).apply()
+                }
+                PulsoPill(
+                    "Proteção contra anúncios: " + if (adblock) "Ligada" else "Desligada",
+                    height = 44.dp, modifier = Modifier.fillMaxWidth(),
+                ) {
+                    adblock = !adblock
+                    prefs.edit()
+                        .putBoolean(PREF_ADBLOCK, adblock)
+                        .putBoolean(C.PLAYER_USE_VIDEO_SWAP, adblock)
+                        .putBoolean(C.PLAYER_HIDE_ADS, adblock)
+                        .apply()
+                }
                 PulsoPill("Voltar", primary = true, height = 44.dp, modifier = Modifier.fillMaxWidth()) { finish() }
             }
         }
@@ -113,5 +146,8 @@ class PulsoSettingsActivity : ComponentActivity() {
 
     companion object {
         const val PREF_CHAT_TEXT = "pulso_chat_text"
+        const val PREF_CHAT_ON_OPEN = "pulso_chat_on_open"   // player opens with the chat visible (and connected)
+        const val PREF_PREVIEW = "pulso_preview"             // live preview while a stream card has the focus
+        const val PREF_ADBLOCK = "pulso_adblock"             // anonymous token first + video swap + hide ads
     }
 }

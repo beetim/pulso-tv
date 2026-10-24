@@ -695,6 +695,7 @@ private fun StreamCard(
                             modifier = Modifier.fillMaxSize()
                         )
                     }
+                    StreamPreview(stream.channelLogin, focused == 1)
                     LiveBadge(Modifier.align(Alignment.TopStart).padding(8.dp))
                     ViewersPill(
                         formatViewers(stream.viewerCount ?: 0) + " espectadores",

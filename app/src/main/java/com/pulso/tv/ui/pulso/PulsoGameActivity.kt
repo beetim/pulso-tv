@@ -374,6 +374,7 @@ class PulsoGameActivity : ComponentActivity() {
             title = s.title.orEmpty(),
             subtitle = s.channelName ?: s.channelLogin.orEmpty(),
             live = true,
+            previewLogin = s.channelLogin,
             bottomStart = compactCount(s.viewerCount ?: 0) + " espectadores",
         ) {
             startActivity(

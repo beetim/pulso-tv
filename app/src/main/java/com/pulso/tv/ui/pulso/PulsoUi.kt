@@ -57,6 +57,7 @@ fun PulsoCard(
     bottomEnd: String? = null,
     focusRequester: FocusRequester? = null,
     translateSubtitle: Boolean = true,
+    previewLogin: String? = null,   // live channel: plays a muted preview while the card is focused
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -102,6 +103,7 @@ fun PulsoCard(
                             modifier = Modifier.fillMaxSize()
                         )
                     }
+                    if (live) StreamPreview(previewLogin, focused)
                     if (live) {
                         Box(
                             Modifier.align(Alignment.TopStart).padding(8.dp)

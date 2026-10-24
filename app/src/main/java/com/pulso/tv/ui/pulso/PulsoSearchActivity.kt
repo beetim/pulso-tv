@@ -286,6 +286,7 @@ class PulsoSearchActivity : ComponentActivity() {
                         title = s.title.orEmpty(),
                         subtitle = playingText(s.channelName ?: s.channelLogin, s.gameName),
                         live = true,
+                        previewLogin = s.channelLogin,
                         bottomStart = (s.viewerCount ?: 0).let { compactCount(it) + " espectadores" },
                         translateSubtitle = false, // playingText is already translated
                     ) {

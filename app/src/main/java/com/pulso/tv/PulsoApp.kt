@@ -51,11 +51,42 @@ class PulsoApp : Application(), SingletonImageLoader.Factory {
                 .apply()
         }
         pulsoModule = PulsoModule(this)
+        seedAdBlocking(preferences)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             val conscrypt = Conscrypt.newProvider()
             Security.insertProviderAt(conscrypt, 1)
         }
         warmUpNetwork()
+    }
+
+    /**
+     * Ad protection, once per install. Playback tokens are asked anonymously first (PlayerRepository), no
+     * third-party proxy is used, and when an ad still shows up in the playlist (mid-roll) the engine's
+     * video swap plays the same channel through another player type until the ad ends; if every
+     * swap fails, the picture and sound are hidden during the ad ("hide ads").
+     */
+    private fun seedAdBlocking(preferences: android.content.SharedPreferences) {
+        if (preferences.getBoolean("pulso_adblock_v1", false)) return
+        preferences.edit()
+            .putBoolean(C.PLAYER_USE_CUSTOM_PROXY, false) // would otherwise turn video swap off
+            .putBoolean(C.PLAYER_USE_STREAM_PROXY, false)
+            .putBoolean(C.PLAYER_USE_VIDEO_SWAP, true)
+            .putBoolean(C.PLAYER_HIDE_ADS, true)
+            .putBoolean("pulso_adblock_v1", true)
+            .apply()
+        Thread {
+            runCatching {
+                val repo = pulsoModule.playerRepository
+                kotlinx.coroutines.runBlocking {
+                    if (repo.getVideoSwapItems().isEmpty()) {
+                        repo.saveVideoSwapItems(
+                            listOf("android" to "autoplay", "web" to "popout", "web" to "autoplay")
+                                .mapIndexed { i, p -> com.pulso.tv.model.ui.VideoSwap(p.first, p.second, i, true) }
+                        )
+                    }
+                }
+            }
+        }.start()
     }
 
     /**

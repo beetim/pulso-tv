@@ -43,6 +43,7 @@ import com.pulso.tv.model.ui.StreamProxy
 import com.pulso.tv.model.ui.TranslatedChannel
 import com.pulso.tv.model.ui.VideoSwap
 import com.pulso.tv.util.C
+import com.pulso.tv.util.prefs
 import com.pulso.tv.util.NetworkUtils
 import com.pulso.tv.util.NetworkUtils.executeAsync
 import kotlinx.coroutines.Dispatchers
@@ -95,9 +96,15 @@ class PlayerRepository(
     suspend fun loadStreamPlaylistUrl(context: Context, networkLibrary: String?, gqlHeaders: Map<String, String>, channelLogin: String, platform: String?, playerType: String?, supportedCodecs: String?, proxyPlaybackAccessToken: Boolean, proxyHost: String?, proxyPort: Int?, proxyUser: String?, proxyPassword: String?, proxyTimeout: Int?, enableIntegrity: Boolean): String = withContext(Dispatchers.IO) {
         val platform = platform?.takeIf { it.isNotBlank() } ?: "web"
         val playerType = playerType?.takeIf { it.isNotBlank() } ?: "site"
-        val accessToken = loadStreamPlaybackAccessToken(context, networkLibrary, gqlHeaders, channelLogin, platform, playerType, proxyPlaybackAccessToken, proxyHost, proxyPort, proxyUser, proxyPassword, proxyTimeout, enableIntegrity).let { token ->
-            if (token.second?.contains("\"forbidden\":true") == true && !gqlHeaders[C.HEADER_TOKEN].isNullOrBlank()) {
-                loadStreamPlaybackAccessToken(context, networkLibrary, gqlHeaders.filterNot { it.key == C.HEADER_TOKEN }, channelLogin, platform, playerType, proxyPlaybackAccessToken, proxyHost, proxyPort, proxyUser, proxyPassword, proxyTimeout, enableIntegrity)
+        // Anonymous first: Twitch serves ads (pre-roll) to logged-in non-subscribers on the site player, and
+        // the anonymous token came back ad-free in tests. The account token is only used when the channel
+        // refuses the anonymous one (subscriber-only streams, restrictions).
+        val hasAccount = !gqlHeaders[C.HEADER_TOKEN].isNullOrBlank()
+        val anonymousFirst = hasAccount && context.prefs().getBoolean("pulso_adblock", true)
+        val anonymousHeaders = if (anonymousFirst) gqlHeaders.filterNot { it.key == C.HEADER_TOKEN } else gqlHeaders
+        val accessToken = loadStreamPlaybackAccessToken(context, networkLibrary, anonymousHeaders, channelLogin, platform, playerType, proxyPlaybackAccessToken, proxyHost, proxyPort, proxyUser, proxyPassword, proxyTimeout, enableIntegrity).let { token ->
+            if (anonymousFirst && token.second?.contains("\"forbidden\":true") == true) {
+                loadStreamPlaybackAccessToken(context, networkLibrary, gqlHeaders, channelLogin, platform, playerType, proxyPlaybackAccessToken, proxyHost, proxyPort, proxyUser, proxyPassword, proxyTimeout, enableIntegrity)
             } else token
         }
         val signature = accessToken.first

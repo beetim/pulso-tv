@@ -111,7 +111,9 @@ class PulsoPlayerActivity : ComponentActivity() {
     private var tick by mutableIntStateOf(0)
     private var playing by mutableStateOf(false)
     private var buffering by mutableStateOf(true)
-    private var chatStarted = false
+    private var chatStarted = false       // the chat was started once (emotes and recent messages are loaded)
+    private var chatConnected = false     // the chat sockets are open right now
+    private var inForeground = false
     private var everReady = false          // the player reached READY at least once (guards the resume point)
     private var resumeOnStart = false      // was playing when the activity stopped (Home button, standby)
     private var loadAttempt by mutableIntStateOf(0)  // bumped on retry to restart the loading timeout
@@ -152,7 +154,7 @@ class PulsoPlayerActivity : ComponentActivity() {
                 loadFollowState()
                 val svc = service
                 val login = svc?.channelLogin
-                if (!isVod && chatStarted && svc != null && !login.isNullOrBlank()) {
+                if (!isVod && chatConnected && svc != null && !login.isNullOrBlank()) {
                     chatViewModel.startLiveChat(svc.channelId, login)
                 }
             }
@@ -202,7 +204,8 @@ class PulsoPlayerActivity : ComponentActivity() {
         isVod = video != null || clip != null
         isClip = clip != null
         vod = video
-        if (isVod) chatVisible = false // chat replay is not part of Pulso yet
+        // chat replay is not part of Pulso yet; for live, Settings decides whether the chat opens with the player
+        chatVisible = !isVod && prefs().getBoolean(PulsoSettingsActivity.PREF_CHAT_ON_OPEN, true)
 
         // the screen header reads a Stream; a recorded video or clip is shown through one too
         val header = stream ?: video?.let {
@@ -362,18 +365,35 @@ class PulsoPlayerActivity : ComponentActivity() {
         (svc.secondaryPlayer ?: svc.player)?.setVideoSurfaceView(sv)
     }
 
+    /**
+     * The chat connection follows what is on screen: it only exists while the chat is visible (not hidden,
+     * not full screen, activity in front). Hiding it really disconnects the sockets (they cost bandwidth and
+     * CPU while the stream plays); showing it again reconnects and keeps the messages already received.
+     */
     private fun startChatIfReady() {
         val svc = service ?: return
-        if (isVod || chatStarted || svc.channelLogin.isNullOrBlank()) return
-        chatStarted = true
-        chatViewModel.startLive(
-            prefs().getString(C.NETWORK_LIBRARY, C.OKHTTP),
-            prefs().getString(C.CHAT_RECENT_MESSAGES_URL, "https://recent-messages.robotty.de/api/v2/recent-messages/\$channel"),
-            svc.channelId,
-            svc.channelLogin,
-            svc.channelName,
-            svc.streamId,
-        )
+        val login = svc.channelLogin
+        if (isVod || login.isNullOrBlank()) return
+        val want = chatVisible && !fullscreen && inForeground
+        if (want && !chatConnected) {
+            chatConnected = true
+            if (!chatStarted) {
+                chatStarted = true
+                chatViewModel.startLive(
+                    prefs().getString(C.NETWORK_LIBRARY, C.OKHTTP),
+                    prefs().getString(C.CHAT_RECENT_MESSAGES_URL, "https://recent-messages.robotty.de/api/v2/recent-messages/\$channel"),
+                    svc.channelId,
+                    svc.channelLogin,
+                    svc.channelName,
+                    svc.streamId,
+                )
+            } else {
+                chatViewModel.startLiveChat(svc.channelId, login)
+            }
+        } else if (!want && chatConnected) {
+            chatConnected = false
+            chatViewModel.stopLiveChat()
+        }
     }
 
     private fun toggleMute() {
@@ -485,6 +505,8 @@ class PulsoPlayerActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        inForeground = true
+        startChatIfReady()
         if (resumeOnStart) {
             resumeOnStart = false
             service?.let { it.player?.play(); it.secondaryPlayer?.play() }
@@ -497,6 +519,8 @@ class PulsoPlayerActivity : ComponentActivity() {
         resumeOnStart = (svc?.secondaryPlayer ?: svc?.player)?.playWhenReady == true
         saveVodProgress()
         svc?.pause()
+        inForeground = false
+        startChatIfReady() // disconnects the chat while the screen is in the background
         super.onStop()
     }
 
@@ -649,6 +673,8 @@ class PulsoPlayerActivity : ComponentActivity() {
         }
 
         val showChat = chatVisible && !fullscreen
+        // hiding the chat (or full screen) closes its connection; showing it opens it again
+        LaunchedEffect(showChat) { startChatIfReady() }
         Box(Modifier.fillMaxSize().background(Color.Black)) {
         Row(
             Modifier

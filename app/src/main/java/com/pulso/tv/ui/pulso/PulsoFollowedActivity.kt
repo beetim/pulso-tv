@@ -166,6 +166,7 @@ class PulsoFollowedActivity : ComponentActivity() {
                         title = u.name ?: u.login.orEmpty(),
                         subtitle = u.login.orEmpty(),
                         live = u.isLive == true,
+                        previewLogin = u.login,
                         translateSubtitle = false,
                         focusRequester = if (index == 0) firstCard else null,
                     ) {
