@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7
+- New player option "Chat size" (Small / Medium / Large) that resizes the whole chat block.
+- The profile panel now shows your Twitch profile picture.
+- Automatic update check every 30 minutes (was 6 hours); the "latest version" message is centered.
+
 ## 1.0.6
 - Live preview (with sound) while a stream card has the focus; it can be turned off in Settings.
 - Ad protection: playback token requested anonymously first, plus the engine's video swap and "hide ads" as a safety net. It can be turned off in Settings.

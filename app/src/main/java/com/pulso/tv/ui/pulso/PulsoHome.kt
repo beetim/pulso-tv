@@ -117,6 +117,7 @@ fun PulsoHome(
     shelves: List<Shelf>,
     loggedIn: Boolean,
     userName: String?,
+    avatarUrl: String? = null,
     onRetry: () -> Unit,
     onLogin: () -> Unit,
     onOpen: (Stream) -> Unit,
@@ -243,6 +244,7 @@ fun PulsoHome(
             ProfilePanel(
                 loggedIn = loggedIn,
                 userName = userName.orEmpty(),
+                avatarUrl = avatarUrl,
                 onLogin = { closeProfile(); onLogin() },
                 onLogout = { closeProfile(); onLogout() },
                 onFollowed = { closeProfile(); onFollowedChannels() },
@@ -363,6 +365,7 @@ private fun ExitCard(onStay: () -> Unit, onExit: () -> Unit) {
 private fun ProfilePanel(
     loggedIn: Boolean,
     userName: String,
+    avatarUrl: String?,
     onLogin: () -> Unit,
     onLogout: () -> Unit,
     onFollowed: () -> Unit,
@@ -400,6 +403,13 @@ private fun ProfilePanel(
                             userName.take(1).uppercase(), color = Color.White,
                             fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, translate = false,
                         )
+                        // the initial above stays until the picture arrives
+                        if (!avatarUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = avatarUrl, contentDescription = null,
+                                contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                     Box(Modifier.width(14.dp))
                     Column {
@@ -452,7 +462,13 @@ private fun ProfileFooter() {
         state is PulsoUpdater.State.UpToDate -> "Você está na versão mais recente"
         else -> null
     }
-    if (status != null) Text(status, color = Pulso.TextSecondary, fontSize = 12.sp)
+    if (status != null) {
+        Text(
+            status, color = Pulso.TextSecondary, fontSize = 12.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
     if (PulsoUpdater.enabled) {
         // one pill for both roles, so the focus stays on it when the check finds a release
         PulsoPill(

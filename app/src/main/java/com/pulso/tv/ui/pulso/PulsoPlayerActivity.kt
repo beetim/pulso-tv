@@ -124,6 +124,7 @@ class PulsoPlayerActivity : ComponentActivity() {
     // null | "options" | "quality" | "aspect" | "timer" | "login"
     private var menu by mutableStateOf<String?>(null)
     private var aspect by mutableIntStateOf(0)         // 0 automatic 16:9 · 1 4:3 · 2 fill
+    private var chatSize by mutableIntStateOf(1)       // width of the whole chat block: 0 small · 1 medium · 2 large
     private var sleepMinutes by mutableIntStateOf(0)   // 0 = off
     private var sleepStart by mutableLongStateOf(0L)   // restarts the timer even when the same value is picked again
     private var isVod = false
@@ -206,6 +207,7 @@ class PulsoPlayerActivity : ComponentActivity() {
         vod = video
         // chat replay is not part of Pulso yet; for live, Settings decides whether the chat opens with the player
         chatVisible = !isVod && prefs().getBoolean(PulsoSettingsActivity.PREF_CHAT_ON_OPEN, true)
+        chatSize = prefs().getInt(PulsoSettingsActivity.PREF_CHAT_BLOCK, 1).coerceIn(0, 2)
 
         // the screen header reads a Stream; a recorded video or clip is shown through one too
         val header = stream ?: video?.let {
@@ -748,7 +750,7 @@ class PulsoPlayerActivity : ComponentActivity() {
                 }
             }
             if (showChat) {
-                Column(Modifier.width(280.dp).fillMaxHeight().background(Pulso.Surface)) {
+                Column(Modifier.width(chatWidth().dp).fillMaxHeight().background(Pulso.Surface)) {
                     PulsoChat(chatViewModel, Modifier.weight(1f).fillMaxWidth())
                     Box(Modifier.fillMaxWidth().padding(10.dp)) {
                         PulsoPill(
@@ -860,6 +862,10 @@ class PulsoPlayerActivity : ComponentActivity() {
         val onClick: () -> Unit = {},
     )
 
+    private fun chatWidth() = when (chatSize) { 0 -> 220; 2 -> 360; else -> 280 }
+
+    private fun chatSizeLabel() = when (chatSize) { 0 -> "Pequeno"; 2 -> "Grande"; else -> "Médio" }
+
     private fun aspectLabel() = when (aspect) { 1 -> "4:3"; 2 -> "Preencher"; else -> "Automático" }
 
     private fun timerLabel() = when (sleepMinutes) {
@@ -886,6 +892,7 @@ class PulsoPlayerActivity : ComponentActivity() {
                     MenuRow("Chat", if (isVod) "Indisponível" else if (chatVisible && !fullscreen) "Ocultar" else "Mostrar", enabled = !isVod) {
                         toggleChat()
                     },
+                    MenuRow("Tamanho do chat", if (isVod) "Indisponível" else chatSizeLabel(), enabled = !isVod) { menu = "chatsize" },
                     MenuRow("Legendas", "Indisponível", enabled = false),
                     MenuRow("Temporizador", timerLabel()) { menu = "timer" },
                 ),
@@ -906,6 +913,17 @@ class PulsoPlayerActivity : ComponentActivity() {
                 hint = "Escolher proporção",
                 rows = listOf("Automático", "4:3", "Preencher").mapIndexed { i, name ->
                     MenuRow(name, selected = aspect == i) { aspect = i; menu = "options" }
+                },
+            )
+            "chatsize" -> MenuPanel(
+                title = "Tamanho do chat",
+                hint = "Escolher tamanho",
+                rows = listOf("Pequeno", "Médio", "Grande").mapIndexed { i, name ->
+                    MenuRow(name, selected = chatSize == i) {
+                        chatSize = i
+                        prefs().edit().putInt(PulsoSettingsActivity.PREF_CHAT_BLOCK, i).apply()
+                        menu = "options"
+                    }
                 },
             )
             "timer" -> MenuPanel(

@@ -198,6 +198,7 @@ class PulsoSettingsActivity : ComponentActivity() {
 
     companion object {
         const val PREF_CHAT_TEXT = "pulso_chat_text"
+        const val PREF_CHAT_BLOCK = "pulso_chat_block"       // width of the chat block in the player: 0 small · 1 medium · 2 large
         const val PREF_CHAT_ON_OPEN = "pulso_chat_on_open"   // player opens with the chat visible (and connected)
         const val PREF_PREVIEW = "pulso_preview"             // live preview while a stream card has the focus
         const val PREF_ADBLOCK = "pulso_adblock"             // anonymous token first + video swap + hide ads

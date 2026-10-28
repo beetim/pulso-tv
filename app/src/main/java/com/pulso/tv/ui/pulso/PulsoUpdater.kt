@@ -63,7 +63,7 @@ object PulsoUpdater {
     /** GitHub answered, but not with a release (403 rate limit, 5xx...). */
     private class HttpFailure(val code: Int) : Exception("HTTP $code")
 
-    /** Cheap automatic check: at most once every 6 hours per process. */
+    /** Cheap automatic check: at most once every 30 minutes per process. */
     fun checkIfDue(context: Context) {
         if (!enabled) return
         if (System.currentTimeMillis() - lastCheck < CHECK_INTERVAL_MS) return
@@ -247,5 +247,5 @@ object PulsoUpdater {
         return false
     }
 
-    private const val CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000L
+    private const val CHECK_INTERVAL_MS = 30 * 60 * 1000L
 }

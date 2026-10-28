@@ -82,6 +82,26 @@ class PulsoHomeActivity : ComponentActivity() {
                 var error by remember { mutableStateOf<String?>(null) }
                 val loggedIn = remember(reload) { isLoggedIn() }
                 val userName = remember(reload) { tokenPrefs().getString(C.USERNAME, null) }
+                // Twitch profile picture of the signed-in account; the last known URL shows while the new one loads
+                var avatarUrl by remember(reload) { mutableStateOf(if (loggedIn) prefs().getString(PREF_AVATAR_URL, null) else null) }
+
+                LaunchedEffect(reload) {
+                    if (!loggedIn || userName.isNullOrBlank()) return@LaunchedEffect
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            (application as PulsoApp).pulsoModule.graphQLRepository.loadQueryUsersStream(
+                                prefs().getString(C.NETWORK_LIBRARY, C.OKHTTP),
+                                TwitchApiHelper.getGQLHeaders(this@PulsoHomeActivity),
+                                logins = listOf(userName),
+                            ).data?.users?.firstOrNull()?.profileImageURL
+                        }
+                    }.onSuccess { url ->
+                        if (!url.isNullOrBlank()) {
+                            avatarUrl = url
+                            prefs().edit().putString(PREF_AVATAR_URL, url).apply()
+                        }
+                    }.onFailure { if (it is CancellationException) throw it }
+                }
 
                 LaunchedEffect(reload) {
                     loading = true
@@ -123,6 +143,7 @@ class PulsoHomeActivity : ComponentActivity() {
                     shelves = shelves,
                     loggedIn = loggedIn,
                     userName = userName,
+                    avatarUrl = avatarUrl,
                     onRetry = { reload++ },
                     onLogin = {
                         loginLauncher.launch(Intent(this@PulsoHomeActivity, PulsoLoginActivity::class.java))
@@ -172,6 +193,7 @@ class PulsoHomeActivity : ComponentActivity() {
             // token would keep suppressing the integrity flow after signing out
             .putLong(C.INTEGRITY_EXPIRATION, 0)
             .apply()
+        prefs().edit().remove(PREF_AVATAR_URL).apply()
         TwitchApiHelper.checkedValidation = false
         Toast.makeText(
             this,
@@ -335,5 +357,6 @@ class PulsoHomeActivity : ComponentActivity() {
     private companion object {
         /** Older than this when the Home comes back to the front: reload the shelves. */
         const val STALE_MS = 5 * 60 * 1000L
+        const val PREF_AVATAR_URL = "pulso_avatar_url"
     }
 }
