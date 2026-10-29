@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.0.8
+- Fixed the update loop: the app asked for "install unknown apps" every time and never installed. It now asks once, then downloads and opens the installer.
+
 ## 1.0.7
 - New player option "Chat size" (Small / Medium / Large) that resizes the whole chat block.
 - The profile panel now shows your Twitch profile picture.

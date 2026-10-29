@@ -134,12 +134,22 @@ object PulsoUpdater {
         val release = pending ?: return
         if (state is State.Downloading) return
         val app = context.applicationContext
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !app.packageManager.canRequestPackageInstalls()) {
-            state = State.Failed(
-                if (openUnknownSourcesScreen(app)) "Permita instalar apps desconhecidos para o pulso.tv e toque em Atualizar agora de novo"
-                else "Ative \"Instalar apps desconhecidos\" para o pulso.tv em Configurações > Apps > Acesso especial"
-            )
-            return
+        // Ask for the permission only once. Some TVs keep answering "false" even after it was allowed
+        // (or the app restarts when the switch is flipped), and blocking on that answer looped forever:
+        // from the second tap on we go ahead, and the system installer asks again if it is really missing.
+        // The flag lives in SharedPreferences because flipping the switch can restart the process.
+        val flags = app.getSharedPreferences("pulso_updater", Context.MODE_PRIVATE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (app.packageManager.canRequestPackageInstalls()) {
+                flags.edit().remove(KEY_ASKED_UNKNOWN_SOURCES).apply()
+            } else if (!flags.getBoolean(KEY_ASKED_UNKNOWN_SOURCES, false)) {
+                flags.edit().putBoolean(KEY_ASKED_UNKNOWN_SOURCES, true).apply()
+                state = State.Failed(
+                    if (openUnknownSourcesScreen(app)) "Permita instalar apps desconhecidos para o pulso.tv e toque em Atualizar agora de novo"
+                    else "Ative \"Instalar apps desconhecidos\" para o pulso.tv em Configurações > Apps > Acesso especial"
+                )
+                return
+            }
         }
         val file = apkFile(app, release.version)
         if (isComplete(file, release)) {
@@ -248,4 +258,5 @@ object PulsoUpdater {
     }
 
     private const val CHECK_INTERVAL_MS = 30 * 60 * 1000L
+    private const val KEY_ASKED_UNKNOWN_SOURCES = "asked_unknown_sources"
 }
