@@ -43,8 +43,8 @@ android {
         applicationId = "com.pulso.tv"
         minSdk = 28 // Android 9+: the system TLS is enough, no bundled Conscrypt
         targetSdk = 37
-        versionCode = 130
-        versionName = "1.0.8"
+        versionCode = 131
+        versionName = "1.0.9"
         // "dono/repositorio" dos Releases consultados pelo atualizador; vazio desliga a checagem
         buildConfigField("String", "GITHUB_REPO", "\"${(findProperty("pulso.githubRepo") as String?).orEmpty()}\"")
     }

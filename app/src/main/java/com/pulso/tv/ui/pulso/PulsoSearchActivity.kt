@@ -344,11 +344,7 @@ class PulsoSearchActivity : ComponentActivity() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Canvas(Modifier.size(18.dp)) {
-                val w = size.width
-                drawCircle(fg, radius = w * 0.34f, center = Offset(w * 0.4f, w * 0.4f), style = Stroke(w * 0.12f))
-                drawLine(fg, Offset(w * 0.66f, w * 0.66f), Offset(w * 0.92f, w * 0.92f), w * 0.12f, StrokeCap.Round)
-            }
+            SearchIcon(fg, Modifier.size(24.dp))
             Box(Modifier.weight(1f)) {
                 if (query.isEmpty()) {
                     Text("Buscar", color = if (focused) Color(0xFF4B4B57) else Pulso.TextSecondary, fontSize = 18.sp)

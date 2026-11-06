@@ -1141,7 +1141,7 @@ class PulsoPlayerActivity : ComponentActivity() {
                     ChromeButton(
                         if (fullscreen) "Sair da tela cheia" else "Tela cheia", false, onFullscreen, onInteract,
                         round = true, onHint = { hint = it },
-                        icon = { FullscreenIcon(expand = !fullscreen, color = it, modifier = Modifier.size(13.dp)) },
+                        icon = { FullscreenIcon(expand = !fullscreen, color = it) },
                     )
                 }
             }

@@ -12,6 +12,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.Icon
 import android.media.MediaMetadata
+import android.util.Log
 import android.media.audiofx.DynamicsProcessing
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -1645,9 +1646,15 @@ class ExoPlayerService : BasePlaybackService() {
             val videoSwap = if (!proxy) {
                 videoSwapList?.getOrNull(currentVideoSwapItem)
             } else null
+            // The player this listener belongs to. A replaced swap player must go quiet: before, it kept
+            // firing for every playlist refresh, each time skipping to the next swap item, so the list
+            // ran out in seconds and the ad was left playing on the main player.
+            var self: ExoPlayer? = null
             val playerListener = object : Player.Listener {
                 override fun onTimelineChanged(timeline: Timeline, reason: Int) {
-                    val playlist = (secondaryPlayer?.currentManifest as? HlsManifest)?.mediaPlaylist
+                    val me = self ?: return
+                    if (secondaryPlayer !== me) return
+                    val playlist = (me.currentManifest as? HlsManifest)?.mediaPlaylist
                     val ads = checkPlaylist(playlist)
                     if (ads) {
                         when {
@@ -1670,6 +1677,9 @@ class ExoPlayerService : BasePlaybackService() {
                                 }
                             }
                             videoSwapActive -> {
+                                Log.w("PulsoAds", "swap item $currentVideoSwapItem also has an ad, trying the next one")
+                                me.release()
+                                secondaryPlayer = null
                                 currentVideoSwapItem += 1
                                 if (videoSwapList?.getOrNull(currentVideoSwapItem) != null) {
                                     secondaryPlayerTimerJob?.cancel()
@@ -1682,9 +1692,8 @@ class ExoPlayerService : BasePlaybackService() {
                                     }
                                     startSecondaryPlayer(false)
                                 } else {
-                                    stopVideoSwap = true
-                                    serviceListener?.toast(R.string.stopping_video_swap, Toast.LENGTH_SHORT)
-                                    stopSecondaryPlayer()
+                                    Log.w("PulsoAds", "every swap item has the ad: hiding picture and sound until it ends")
+                                    hideUntilAdEnds()
                                 }
                             }
                         }
@@ -1707,6 +1716,7 @@ class ExoPlayerService : BasePlaybackService() {
                 setSeekBackIncrementMs((prefs().getString(C.PLAYER_REWIND, "10")?.toLongOrNull() ?: 10) * 1000)
                 setSeekForwardIncrementMs((prefs().getString(C.PLAYER_FORWARD, "10")?.toLongOrNull() ?: 10) * 1000)
             }.build()
+            self = player
             player.addListener(playerListener)
             val url = if (streamProxy != null) {
                 quality?.url
@@ -2046,9 +2056,47 @@ class ExoPlayerService : BasePlaybackService() {
                 player.playWhenReady = true
                 secondaryPlayer = player
                 serviceListener?.setPlayerSurface(true)
+            } else if (!proxy && videoSwapActive) {
+                // the swap playlist could not be fetched (token refused, network): try the next player type,
+                // and when none is left hide the ad. Before, this restored the picture with the ad still running.
+                player.release()
+                currentVideoSwapItem += 1
+                if (videoSwapList?.getOrNull(currentVideoSwapItem) != null) {
+                    Log.w("PulsoAds", "swap item ${currentVideoSwapItem - 1} unavailable, trying the next one")
+                    startSecondaryPlayer(false)
+                } else {
+                    Log.w("PulsoAds", "no swap item available: hiding picture and sound until the ad ends")
+                    hideUntilAdEnds()
+                }
             } else {
+                player.release()
                 stopSecondaryPlayer()
             }
+        }
+    }
+
+    /**
+     * The ad could not be swapped away: keep the main player's picture off and its sound muted (both were
+     * already turned off when the swap started) until its own playlist stops carrying the ad. The main
+     * player's no-ads branch (`hidden`) brings the picture back.
+     */
+    private fun hideUntilAdEnds() {
+        videoSwapActive = false
+        proxyMediaPlaylist = false
+        secondaryPlayerTimerJob?.cancel()
+        secondaryPlayerTimerJob = null
+        secondaryPlayer?.release()
+        secondaryPlayer = null
+        serviceListener?.setPlayerSurface(false)
+        currentVideoSwapItem = 0 // the next ad starts again from the first player type
+        hidden = true
+        player?.let { player ->
+            if (quality?.name != VideoQuality.AUDIO_ONLY_QUALITY) {
+                player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().apply {
+                    setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, true)
+                }.build()
+            }
+            player.volume = 0f
         }
     }
 

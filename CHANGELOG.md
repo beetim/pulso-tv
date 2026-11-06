@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.9
+- Ads: when the video swap could not get an ad-free stream, the ad was shown in full. Now every player type is tried properly, and if none works the picture and sound stay hidden until the ad ends.
+- New icons everywhere (player and search), all from the same rounded family.
+
 ## 1.0.8
 - Fixed the update loop: the app asked for "install unknown apps" every time and never installed. It now asks once, then downloads and opens the installer.
 
